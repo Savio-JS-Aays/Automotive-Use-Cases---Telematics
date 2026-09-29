@@ -184,12 +184,28 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
     return { telematicsHealthPct, avgFleetRul, activeCriticalAnomalies, totalFleetDtcs };
   }, [telemetry, healthRows]);
 
-  const anomalyScatter = useMemo(() =>
-      telemetry
-        .filter((t) => t.mahalanobis_score !== null && t.mahalanobis_score !== undefined)
-        .map((t) => ({ date: t.date_id, mahalanobisScore: Number(t.mahalanobis_score) })),
-    [telemetry]
-  );
+  const anomalyTrend = useMemo(() => {
+    const byDate = new Map();
+    for (const t of telemetry) {
+      if (!t.date_id) continue;
+      
+      const score = Number(t.mahalanobis_score);
+      if (Number.isNaN(score)) continue;
+
+      const currentCount = byDate.get(t.date_id) || 0;
+      
+      if (score > FLEET_MAHALANOBIS_THRESHOLD) {
+        byDate.set(t.date_id, currentCount + 1);
+      } else if (!byDate.has(t.date_id)) {
+        // Ensure the date exists on the axis even if there are 0 critical anomalies
+        byDate.set(t.date_id, 0); 
+      }
+    }
+
+    return Array.from(byDate.entries())
+      .map(([date, criticalCount]) => ({ date, criticalCount }))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }, [telemetry]);
 
   const signalDeviation = useMemo(() => {
     const bySignal = new Map();
@@ -322,7 +338,7 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
 
   return {
     mode, loading, error,
-    fleetKpis, anomalyScatter, signalDeviation, fleetSignalAverages, vehicleTableData,
+    fleetKpis, anomalyTrend, signalDeviation, fleetSignalAverages, vehicleTableData,
     healthRecord, assetKpis, assetStatus, telemetryPlayback, subsystemDeviation, signalDistribution
   };
 }

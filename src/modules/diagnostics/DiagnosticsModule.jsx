@@ -10,12 +10,14 @@ import {
   HelpCircle,
 } from "lucide-react";
 import {
+  AreaChart,
+  Area,
   LineChart,
   Line,
   BarChart,
   Bar,
-  ScatterChart,
-  Scatter,
+  PieChart,
+  Pie,
   Cell,
   XAxis,
   YAxis,
@@ -25,10 +27,9 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import KpiCard from "../../components/kpi/KpiCard"; // Ensure path matches your project
+import KpiCard from "../../components/kpi/KpiCard"; 
 import {
   useDiagnosticsData,
-  FLEET_MAHALANOBIS_THRESHOLD,
   CRITICAL_Z_SCORE_THRESHOLD,
 } from "../../hooks/useDiagnosticsData";
 import { useFilterStore } from "../../store/useFilterStore";
@@ -40,7 +41,7 @@ const STATUS_STYLES = {
   Unknown: "bg-slate-100 text-slate-500 border-slate-200",
 };
 
-const CHART_COLORS = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#ec4899", "#10b981", "#64748b"];
+const PIE_COLORS = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#ec4899", "#10b981", "#64748b"];
 
 function ChartHeader({ title, tooltip }) {
   return (
@@ -72,7 +73,7 @@ function formatDateTick(tickItem) {
   return Number.isNaN(d.getTime()) ? tickItem : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function FleetDiagnosticsView({ loading, error, fleetKpis, anomalyScatter, signalDeviation, fleetSignalAverages, vehicleTableData }) {
+function FleetDiagnosticsView({ loading, error, fleetKpis, anomalyTrend, signalDeviation, fleetSignalAverages, vehicleTableData }) {
   const setSelectedVin = useFilterStore((s) => s.setSelectedVin);
 
   return (
@@ -131,20 +132,25 @@ function FleetDiagnosticsView({ loading, error, fleetKpis, anomalyScatter, signa
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <ChartCard
-            title="Fleet Multivariate Anomaly Scatter"
-            tooltip="Plots Mahalanobis Distance (Y-Axis) over Time (X-Axis). Values above the red line indicate severe multivariate anomalies (e.g., Temp and RPM spiking simultaneously)."
+            title="Daily Anomaly Volume Trend"
+            tooltip="Tracks the daily volume of severe multivariate anomalies across the entire fleet. Sudden vertical spikes indicate widespread system distress, batch part failures, or telematics gateway corruption."
           >
             {loading ? (
               <div className="h-64 w-full animate-pulse rounded bg-slate-50" />
-            ) : anomalyScatter.length === 0 ? (
+            ) : anomalyTrend.length === 0 ? (
               <div className="flex h-64 items-center justify-center text-sm text-slate-400">No anomaly data found.</div>
             ) : (
               <ResponsiveContainer width="100%" height={260}>
-                <ScatterChart margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+                <AreaChart data={anomalyTrend} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+                  <defs>
+                    <linearGradient id="anomalyFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#e11d48" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#e11d48" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                   <XAxis
                     dataKey="date"
-                    type="category"
                     tickFormatter={formatDateTick}
                     tick={{ fontSize: 11, fill: "#94a3b8" }}
                     axisLine={{ stroke: "#e2e8f0" }}
@@ -153,20 +159,25 @@ function FleetDiagnosticsView({ loading, error, fleetKpis, anomalyScatter, signa
                     dy={10}
                   />
                   <YAxis
-                    dataKey="mahalanobisScore"
+                    allowDecimals={false}
                     tick={{ fontSize: 11, fill: "#94a3b8" }}
                     axisLine={{ stroke: "#e2e8f0" }}
                     tickLine={false}
                   />
-                  <RechartsTooltip cursor={{ strokeDasharray: "3 3" }} contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
-                  <ReferenceLine
-                    y={FLEET_MAHALANOBIS_THRESHOLD}
-                    stroke="#e11d48"
-                    strokeDasharray="6 4"
-                    label={{ value: "Severe Threshold", position: "insideTopRight", fontSize: 11, fill: "#e11d48" }}
+                  <RechartsTooltip 
+                    cursor={{ strokeDasharray: "3 3" }} 
+                    labelFormatter={formatDateTick}
+                    contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} 
                   />
-                  <Scatter data={anomalyScatter} fill="#0ea5e9" fillOpacity={0.5} line={false} shape="circle" />
-                </ScatterChart>
+                  <Area 
+                    type="monotone" 
+                    dataKey="criticalCount" 
+                    name="Critical Anomalies"
+                    stroke="#e11d48" 
+                    fill="url(#anomalyFill)" 
+                    strokeWidth={2} 
+                  />
+                </AreaChart>
               </ResponsiveContainer>
             )}
           </ChartCard>
@@ -267,7 +278,6 @@ function FleetDiagnosticsView({ loading, error, fleetKpis, anomalyScatter, signa
 function AssetDiagnosticsView({ selectedVin, loading, error, assetKpis, assetStatus, telemetryPlayback, subsystemDeviation, signalDistribution, healthRecord }) {
   const clearSelectedVin = useFilterStore((s) => s.clearSelectedVin);
 
-  // Sort distribution data so the longest bar is always at the top
   const sortedDistribution = [...signalDistribution].sort((a, b) => b.value - a.value);
 
   return (
@@ -334,7 +344,7 @@ function AssetDiagnosticsView({ selectedVin, loading, error, assetKpis, assetSta
                   <RechartsTooltip cursor={{ fill: "#f8fafc" }} contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
                   <Bar dataKey="value" name="Ping Count" radius={[0, 4, 4, 0]} barSize={24}>
                     {sortedDistribution.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -394,7 +404,7 @@ export default function DiagnosticsModule() {
 
   const {
     mode, loading, error,
-    fleetKpis, anomalyScatter, signalDeviation, fleetSignalAverages, vehicleTableData,
+    fleetKpis, anomalyTrend, signalDeviation, fleetSignalAverages, vehicleTableData,
     healthRecord, assetKpis, assetStatus, telemetryPlayback, subsystemDeviation, signalDistribution
   } = useDiagnosticsData({ selectedVin, region, dateRange });
 
@@ -403,7 +413,7 @@ export default function DiagnosticsModule() {
       {mode === "fleet" ? (
         <FleetDiagnosticsView
           loading={loading} error={error}
-          fleetKpis={fleetKpis} anomalyScatter={anomalyScatter} signalDeviation={signalDeviation}
+          fleetKpis={fleetKpis} anomalyTrend={anomalyTrend} signalDeviation={signalDeviation}
           fleetSignalAverages={fleetSignalAverages} vehicleTableData={vehicleTableData}
         />
       ) : (
