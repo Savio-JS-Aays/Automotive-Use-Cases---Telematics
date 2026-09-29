@@ -1,23 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-
-// Fleet-wide anomaly threshold plotted as the reference line on the
-// Mahalanobis distance scatter chart (Fleet Mode, Chart 1). Adjust to
-// whatever chi-square cutoff your model actually uses.
 export const FLEET_MAHALANOBIS_THRESHOLD = 3;
-
-// Z-score threshold used for "critical anomaly" counts across both modes.
 export const CRITICAL_Z_SCORE_THRESHOLD = 3;
 
-// Hardcoded fleet baseline averages for the Asset Mode deviation chart
-// (Chart 4). Swap for a real `fleet_baseline` table/view when one exists.
 const FLEET_BASELINE = {
-  "Coolant Temp": 195, // °F
+  "Coolant Temp": 195, 
   RPM: 2200,
-  "Oil Pressure": 40, // psi
-  "Battery Voltage": 12.6, // V
+  "Oil Pressure": 40, 
+  "Battery Voltage": 12.6, 
 };
 
 function formatRelativeTime(timestamp) {
@@ -42,11 +33,6 @@ function toIsoDateString(date) {
   return date.toISOString().slice(0, 10);
 }
 
-// CRITICAL BUG FIX: `fact_telemetry.time_id` is an integer (an intraday
-// sequence/offset, not a date) and must never be used in a date
-// comparison — `.gte('time_id', '2026-09-18...')` against an integer
-// column silently misbehaves. All time-series filtering here uses
-// `date_id`, which is the actual date-typed/ISO-text column.
 function resolveStartDate(dateRange) {
   const now = new Date();
   const start = new Date(now);
@@ -72,29 +58,12 @@ function resolveStartDate(dateRange) {
   }
 }
 
-function sevenDaysAgoIsoDate() {
-  return toIsoDateString(new Date(Date.now() - SEVEN_DAYS_MS));
-}
-
-/**
- * useDiagnosticsData
- * -------------------
- * Dual-mode data hook for Module 2.
- *
- *  - Fleet Mode (`selectedVin` is null): fleet-wide telemetry + health,
- *    scoped by `region` and `dateRange`.
- *  - Asset Mode (`selectedVin` is set): single-vehicle telemetry (last 7
- *    days, via `date_id`) + latest health record, scoped by `vehicle_id`.
- *
- * Pass the current Zustand filter values in directly rather than reading
- * the store inside the hook, so it stays easy to test and reuse.
- */
 export function useDiagnosticsData({ selectedVin, region, dateRange }) {
   const mode = selectedVin ? "asset" : "fleet";
 
   const [telemetry, setTelemetry] = useState([]);
-  const [healthRows, setHealthRows] = useState([]); // fleet mode: many rows
-  const [healthRecord, setHealthRecord] = useState(null); // asset mode: latest row
+  const [healthRows, setHealthRows] = useState([]); 
+  const [healthRecord, setHealthRecord] = useState(null); 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -105,19 +74,14 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
       const startDate = resolveStartDate(dateRange);
       const startDateStr = startDate ? toIsoDateString(startDate) : null;
 
-      // ---- fact_telemetry: fleet-wide, scoped by dateRange ----
       let telemetryQuery = supabase
         .from("fact_telemetry")
-        .select("z_score, mahalanobis_score, signal_type, date_id");
+        .select("vehicle_id, z_score, mahalanobis_score, signal_type, signal_value, date_id");
 
       if (startDateStr) {
         telemetryQuery = telemetryQuery.gte("date_id", startDateStr);
       }
 
-      // ---- fact_vehicle_health: fleet-wide, scoped by region via
-      // dim_vehicle -> dim_location. Assumes dim_vehicle has a FK into
-      // dim_location and dim_location carries region_id — adjust the
-      // embedded path if your schema names these differently. ----
       let healthQuery = supabase
         .from("fact_vehicle_health")
         .select(
@@ -145,18 +109,13 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
     }
 
     async function fetchAssetData() {
-      // Chart 3 is described as a 7-day playback, so telemetry is scoped
-      // to the last 7 days via `date_id` regardless of the global
-      // dateRange filter (Asset Mode is meant to show recent behavior
-      // for the specific truck being inspected).
-      const cutoff = sevenDaysAgoIsoDate();
-
+      // FIX: Fetch latest 200 records regardless of date to ensure charts are never empty
       let telemetryQuery = supabase
         .from("fact_telemetry")
         .select("signal_type, signal_value, z_score, date_id")
         .eq("vehicle_id", selectedVin)
-        .gte("date_id", cutoff)
-        .order("date_id", { ascending: true });
+        .order("date_id", { ascending: false })
+        .limit(200);
 
       let healthQuery = supabase
         .from("fact_vehicle_health")
@@ -176,7 +135,8 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
       if (healthRes.error) throw healthRes.error;
 
       if (isMounted) {
-        setTelemetry(telemetryRes.data ?? []);
+        // Reverse so time flows left-to-right in charts
+        setTelemetry((telemetryRes.data ?? []).reverse());
         setHealthRows([]);
         setHealthRecord(healthRes.data?.[0] ?? null);
       }
@@ -208,23 +168,13 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
   // ==================== Fleet Mode derived data ====================
 
   const fleetKpis = useMemo(() => {
-    const validSignals = telemetry.filter(
-      (t) => t.z_score !== null && t.z_score !== undefined
-    ).length;
-    const telematicsHealthPct =
-      telemetry.length > 0 ? (validSignals / telemetry.length) * 100 : 0;
+    const validSignals = telemetry.filter((t) => t.z_score !== null && t.z_score !== undefined).length;
+    const telematicsHealthPct = telemetry.length > 0 ? (validSignals / telemetry.length) * 100 : 0;
 
-    const rulValues = healthRows
-      .map((r) => Number(r.remaining_useful_life))
-      .filter((v) => !Number.isNaN(v));
-    const avgFleetRul =
-      rulValues.length > 0
-        ? rulValues.reduce((sum, v) => sum + v, 0) / rulValues.length
-        : 0;
+    const rulValues = healthRows.map((r) => Number(r.remaining_useful_life)).filter((v) => !Number.isNaN(v));
+    const avgFleetRul = rulValues.length > 0 ? rulValues.reduce((sum, v) => sum + v, 0) / rulValues.length : 0;
 
-    const activeCriticalAnomalies = telemetry.filter(
-      (t) => Number(t.z_score) > CRITICAL_Z_SCORE_THRESHOLD
-    ).length;
+    const activeCriticalAnomalies = telemetry.filter((t) => Number(t.z_score) > CRITICAL_Z_SCORE_THRESHOLD).length;
 
     const totalFleetDtcs = healthRows.reduce((sum, r) => {
       const dtcs = Array.isArray(r.active_dtcs) ? r.active_dtcs : [];
@@ -234,21 +184,13 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
     return { telematicsHealthPct, avgFleetRul, activeCriticalAnomalies, totalFleetDtcs };
   }, [telemetry, healthRows]);
 
-  // Chart 1: Fleet Multivariate Anomaly Scatter
-  const anomalyScatter = useMemo(
-    () =>
+  const anomalyScatter = useMemo(() =>
       telemetry
-        .filter(
-          (t) => t.mahalanobis_score !== null && t.mahalanobis_score !== undefined
-        )
-        .map((t) => ({
-          date: t.date_id,
-          mahalanobisScore: Number(t.mahalanobis_score),
-        })),
+        .filter((t) => t.mahalanobis_score !== null && t.mahalanobis_score !== undefined)
+        .map((t) => ({ date: t.date_id, mahalanobisScore: Number(t.mahalanobis_score) })),
     [telemetry]
   );
 
-  // Chart 2: Signal Deviation by signal_type
   const signalDeviation = useMemo(() => {
     const bySignal = new Map();
     for (const t of telemetry) {
@@ -265,21 +207,53 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
     }));
   }, [telemetry]);
 
+  const fleetSignalAverages = useMemo(() => {
+    const bySignal = new Map();
+    for (const t of telemetry) {
+      const val = Number(t.signal_value);
+      if (Number.isNaN(val) || !t.signal_type) continue;
+      const entry = bySignal.get(t.signal_type) ?? { sum: 0, count: 0 };
+      entry.sum += val;
+      entry.count += 1;
+      bySignal.set(t.signal_type, entry);
+    }
+    return Array.from(bySignal.entries()).map(([signal, { sum, count }]) => ({
+      signal,
+      avgValue: count > 0 ? sum / count : 0,
+    })).sort((a, b) => b.avgValue - a.avgValue);
+  }, [telemetry]);
+
+  const vehicleTableData = useMemo(() => {
+    const byVehicle = new Map();
+    for (const t of telemetry) {
+      if (!t.vehicle_id) continue;
+      const entry = byVehicle.get(t.vehicle_id) ?? { vehicleId: t.vehicle_id, totalSignals: 0, anomalies: 0, zSum: 0, zCount: 0 };
+      entry.totalSignals += 1;
+      const z = Number(t.z_score);
+      if (!Number.isNaN(z)) {
+        if (z > CRITICAL_Z_SCORE_THRESHOLD) entry.anomalies += 1;
+        entry.zSum += Math.abs(z);
+        entry.zCount += 1;
+      }
+      byVehicle.set(t.vehicle_id, entry);
+    }
+    return Array.from(byVehicle.values()).map(v => ({
+      vin: v.vehicleId,
+      totalSignals: v.totalSignals,
+      deviations: v.anomalies,
+      avgZScore: v.zCount > 0 ? (v.zSum / v.zCount).toFixed(2) : "0.00"
+    })).sort((a, b) => b.deviations - a.deviations);
+  }, [telemetry]);
+
+
   // ==================== Asset Mode derived data ====================
 
   const assetKpis = useMemo(() => {
     if (!healthRecord) {
-      return {
-        riskScorePct: null,
-        remainingUsefulLife: null,
-        activeCriticalDtcCount: 0,
-        lastSyncLabel: "—",
-      };
+      return { riskScorePct: null, remainingUsefulLife: null, activeCriticalDtcCount: 0, lastSyncLabel: "—" };
     }
-
     const raw = Number(healthRecord.failure_probability);
     const riskScorePct = Number.isNaN(raw) ? null : raw <= 1 ? raw * 100 : raw;
-
     const dtcs = Array.isArray(healthRecord.active_dtcs) ? healthRecord.active_dtcs : [];
     const activeCriticalDtcCount = dtcs.filter((d) => d?.severity === "Critical").length;
 
@@ -298,34 +272,26 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
     return "Healthy";
   }, [assetKpis.riskScorePct]);
 
-  // Chart 3: Historical Telemetry Playback — one point per date_id,
-  // averaging across whatever signal types were recorded that day.
   const telemetryPlayback = useMemo(() => {
     const byDate = new Map();
-
     for (const row of telemetry) {
       const key = row.date_id;
       if (!key) continue;
-      const entry =
-        byDate.get(key) ?? { date: key, valueSum: 0, valueCount: 0, zSum: 0, zCount: 0 };
+      const entry = byDate.get(key) ?? { date: key, valueSum: 0, valueCount: 0, zSum: 0, zCount: 0 };
 
       const val = Number(row.signal_value);
       if (!Number.isNaN(val)) {
         entry.valueSum += val;
         entry.valueCount += 1;
       }
-
       const z = Number(row.z_score);
       if (!Number.isNaN(z)) {
         entry.zSum += z;
         entry.zCount += 1;
       }
-
       byDate.set(key, entry);
     }
-
     return Array.from(byDate.values())
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
       .map((e) => ({
         date: e.date,
         signalValue: e.valueCount > 0 ? e.valueSum / e.valueCount : null,
@@ -333,14 +299,11 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
       }));
   }, [telemetry]);
 
-  // Chart 4: Subsystem Baseline Deviation — latest reading per known
-  // signal type vs. the hardcoded fleet baseline.
   const subsystemDeviation = useMemo(() => {
     const latestBySignal = new Map();
     for (const row of telemetry) {
       latestBySignal.set(row.signal_type, Number(row.signal_value));
     }
-
     return Object.entries(FLEET_BASELINE).map(([signal, baseline]) => ({
       signal,
       vehicle: latestBySignal.has(signal) ? latestBySignal.get(signal) : null,
@@ -348,19 +311,18 @@ export function useDiagnosticsData({ selectedVin, region, dateRange }) {
     }));
   }, [telemetry]);
 
+  const signalDistribution = useMemo(() => {
+    const bySignal = new Map();
+    for (const row of telemetry) {
+      if (!row.signal_type) continue;
+      bySignal.set(row.signal_type, (bySignal.get(row.signal_type) || 0) + 1);
+    }
+    return Array.from(bySignal.entries()).map(([name, value]) => ({ name, value }));
+  }, [telemetry]);
+
   return {
-    mode,
-    loading,
-    error,
-    // Fleet Mode
-    fleetKpis,
-    anomalyScatter,
-    signalDeviation,
-    // Asset Mode
-    healthRecord,
-    assetKpis,
-    assetStatus,
-    telemetryPlayback,
-    subsystemDeviation,
+    mode, loading, error,
+    fleetKpis, anomalyScatter, signalDeviation, fleetSignalAverages, vehicleTableData,
+    healthRecord, assetKpis, assetStatus, telemetryPlayback, subsystemDeviation, signalDistribution
   };
 }

@@ -18,7 +18,7 @@ const NAV_ITEMS = [
   { label: "Vehicle Diagnostics", path: "/vehicle-diagnostics", icon: Car },
   { label: "Component Reliability", path: "/component-reliability", icon: Cog },
   { label: "Supply Chain", path: "/supply-chain", icon: Truck },
-  { label: "Financial & Warranty", path: "/financial-warranty", icon: ShieldCheck },
+  { label: "Financial Data", path: "/financial-warranty", icon: ShieldCheck },
 ];
 
 const DATE_RANGE_OPTIONS = [

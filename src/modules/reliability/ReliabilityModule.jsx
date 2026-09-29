@@ -1,26 +1,24 @@
-import React from "react";
-import { Gauge, Target, Wrench, TrendingDown } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Gauge, Target, Wrench, TrendingDown, HelpCircle } from "lucide-react";
 import {
+  AreaChart,
+  Area,
   LineChart,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
-  Legend,
   ResponsiveContainer,
 } from "recharts";
-import KpiCard from "../../components/kpi/KpiCard";
-import InfoTooltip from "../../components/ui/InfoTooltip";
+import KpiCard from "../../components/kpi/KpiCard"; // Ensure this path is correct
 import { useReliabilityData } from "../../hooks/useReliabilityData";
 
-const SUPPLIER_COLORS = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#10b981", "#e11d48", "#64748b"];
-
 const HAZARD_STYLES = {
-  Critical: "bg-rose-100 text-rose-700",
-  Watch: "bg-amber-100 text-amber-700",
-  "On Spec": "bg-emerald-100 text-emerald-700",
-  "Insufficient Data": "bg-slate-100 text-slate-500",
+  Critical: "bg-rose-100 text-rose-700 border-rose-200",
+  Watch: "bg-amber-100 text-amber-700 border-amber-200",
+  "On Spec": "bg-emerald-100 text-emerald-700 border-emerald-200",
+  "Insufficient Data": "bg-slate-100 text-slate-500 border-slate-200",
 };
 
 const fmtMiles = (n) => `${Math.round(n).toLocaleString()} mi`;
@@ -30,13 +28,29 @@ function fmtSignedMiles(n) {
   return `${rounded > 0 ? "+" : ""}${rounded.toLocaleString()} mi`;
 }
 
-function ChartCard({ title, tooltip, children }) {
+function ChartHeader({ title, tooltip, action }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <div className="mb-4 flex items-center gap-1.5">
+    <div className="mb-4 flex items-center justify-between">
+      <div className="flex items-center gap-1.5">
         <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
-        {tooltip && <InfoTooltip text={tooltip} />}
+        {tooltip && (
+          <div className="group relative flex items-center">
+            <HelpCircle className="h-3.5 w-3.5 cursor-help text-slate-400 transition-colors hover:text-slate-600" />
+            <div className="pointer-events-none absolute left-1/2 top-6 z-50 w-64 -translate-x-1/2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-normal normal-case tracking-normal text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+              {tooltip}
+            </div>
+          </div>
+        )}
       </div>
+      {action && <div>{action}</div>}
+    </div>
+  );
+}
+
+function ChartCard({ title, tooltip, action, children }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <ChartHeader title={title} tooltip={tooltip} action={action} />
       {children}
     </div>
   );
@@ -49,8 +63,8 @@ function VariancePill({ variance }) {
   const negative = variance < 0;
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-        negative ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${
+        negative ? "bg-rose-50 text-rose-700 border-rose-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"
       }`}
     >
       {fmtSignedMiles(variance)}
@@ -69,15 +83,23 @@ export default function ReliabilityModule() {
     componentTable,
   } = useReliabilityData();
 
-  const worst = kpis.worstVariance;
+  // Local state for the Supplier Dropdown in the Weibull Plot
+  const [selectedSupplier, setSelectedSupplier] = useState("");
 
-  const handleRowClick = () => {
-    // Hook up drill-down here (e.g. a part-level detail view) when it exists.
-  };
+  // Keep dropdown default synced to data load
+  useEffect(() => {
+    if (weibullSuppliers.length > 0 && (!selectedSupplier || !weibullSuppliers.includes(selectedSupplier))) {
+      setSelectedSupplier(weibullSuppliers[0]);
+    }
+  }, [weibullSuppliers, selectedSupplier]);
+
+  const worst = kpis.worstVariance;
 
   return (
     <div className="h-full overflow-y-auto bg-slate-50 p-6">
-      <h1 className="mb-6 text-base font-semibold text-slate-800">Component Reliability</h1>
+      <div className="mb-6 border-b border-slate-200 pb-4">
+        <h1 className="text-base font-bold text-slate-800">Component Reliability</h1>
+      </div>
 
       {error && (
         <div className="mb-6 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -146,57 +168,85 @@ export default function ReliabilityModule() {
           tooltip="Kaplan-Meier survival function S(t). Plots the probability of a component surviving without failure as vehicle mileage accumulates."
         >
           {loading ? (
-            <div className="h-64 w-full animate-pulse rounded bg-slate-100" />
+            <div className="h-64 w-full animate-pulse rounded bg-slate-50" />
           ) : survivalCurve.length === 0 ? (
             <div className="flex h-64 items-center justify-center text-sm text-slate-400">
               No failure data in the current filter range.
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={survivalCurve}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <AreaChart data={survivalCurve} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="survivalFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis
                   dataKey="label"
                   tick={{ fontSize: 11, fill: "#94a3b8" }}
                   axisLine={{ stroke: "#e2e8f0" }}
                   tickLine={false}
-                  label={{ value: "Mileage (mi)", position: "insideBottom", offset: -2, fontSize: 11, fill: "#94a3b8" }}
+                  dy={10}
                 />
                 <YAxis
                   domain={[0, 100]}
                   tickFormatter={(v) => `${v}%`}
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
+                  tick={{ fontSize: 11, fill: "#94a3b8" }}
                   axisLine={{ stroke: "#e2e8f0" }}
                   tickLine={false}
                 />
-                <RechartsTooltip formatter={(v) => `${Number(v).toFixed(1)}%`} />
-                <Line
-                  type="stepAfter"
+                <RechartsTooltip 
+                  formatter={(v) => `${Number(v).toFixed(1)}%`}
+                  contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+                />
+                <Area
+                  type="monotone"
                   dataKey="survival"
                   name="Survival Probability"
                   stroke="#0ea5e9"
                   strokeWidth={2}
-                  dot={false}
+                  fillOpacity={1}
+                  fill="url(#survivalFill)"
                 />
-              </LineChart>
+              </AreaChart>
             </ResponsiveContainer>
           )}
         </ChartCard>
 
         <ChartCard
           title="Weibull Probability Plot"
-          tooltip="Log-log Weibull distribution charting cumulative failure percentages against mileage. Diverging lines indicate significant durability disparities between suppliers."
+          tooltip="Log-log Weibull distribution charting cumulative failure percentages against mileage for individual suppliers."
+          action={
+            <select
+              value={selectedSupplier}
+              onChange={(e) => setSelectedSupplier(e.target.value)}
+              disabled={loading || weibullSuppliers.length === 0}
+              className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            >
+              {weibullSuppliers.length === 0 ? (
+                <option value="">No Suppliers</option>
+              ) : (
+                weibullSuppliers.map((supplier) => (
+                  <option key={supplier} value={supplier}>
+                    {supplier}
+                  </option>
+                ))
+              )}
+            </select>
+          }
         >
           {loading ? (
-            <div className="h-64 w-full animate-pulse rounded bg-slate-100" />
+            <div className="h-64 w-full animate-pulse rounded bg-slate-50" />
           ) : weibullRows.length === 0 ? (
             <div className="flex h-64 items-center justify-center text-sm text-slate-400">
               No failure data in the current filter range.
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={weibullRows}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <LineChart data={weibullRows} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis
                   dataKey="mileage"
                   type="number"
@@ -206,32 +256,31 @@ export default function ReliabilityModule() {
                   tick={{ fontSize: 11, fill: "#94a3b8" }}
                   axisLine={{ stroke: "#e2e8f0" }}
                   tickLine={false}
-                  label={{ value: "Mileage (mi, log scale)", position: "insideBottom", offset: -2, fontSize: 11, fill: "#94a3b8" }}
+                  dy={10}
                 />
                 <YAxis
                   domain={[0, 100]}
                   tickFormatter={(v) => `${v}%`}
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
+                  tick={{ fontSize: 11, fill: "#94a3b8" }}
                   axisLine={{ stroke: "#e2e8f0" }}
                   tickLine={false}
                 />
                 <RechartsTooltip
                   labelFormatter={(v) => `${Number(v).toLocaleString()} mi`}
-                  formatter={(v) => `${Number(v).toFixed(1)}%`}
+                  formatter={(v) => [`${Number(v).toFixed(1)}%`, selectedSupplier]}
+                  contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
                 />
-                <Legend />
-                {weibullSuppliers.map((supplier, i) => (
+                {selectedSupplier && (
                   <Line
-                    key={supplier}
                     type="monotone"
-                    dataKey={supplier}
-                    name={supplier}
-                    stroke={SUPPLIER_COLORS[i % SUPPLIER_COLORS.length]}
-                    strokeWidth={2}
+                    dataKey={selectedSupplier}
+                    name={selectedSupplier}
+                    stroke="#8b5cf6"
+                    strokeWidth={2.5}
                     dot={false}
                     connectNulls
                   />
-                ))}
+                )}
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -239,10 +288,14 @@ export default function ReliabilityModule() {
       </div>
 
       {/* Section C: Master Component Reliability Table */}
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-5 py-4 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-slate-800">Component Variance Master</h3>
+          <ChartHeader tooltip="Actuarial table listing components, actual calculated B10 lifespan, and deviation from OEM design specs." />
+        </div>
         <div className="max-h-96 overflow-y-auto">
           <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 bg-white">
+            <thead className="sticky top-0 bg-slate-50 z-10">
               <tr>
                 {[
                   "Component Name",
@@ -254,27 +307,27 @@ export default function ReliabilityModule() {
                 ].map((col) => (
                   <th
                     key={col}
-                    className="border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400"
+                    className="border-b border-slate-200 px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-400"
                   >
                     {col}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-slate-100">
+                  <tr key={i}>
                     {Array.from({ length: 6 }).map((__, j) => (
-                      <td key={j} className="px-4 py-3">
-                        <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
+                      <td key={j} className="px-5 py-4">
+                        <div className="h-4 w-full animate-pulse rounded bg-slate-50" />
                       </td>
                     ))}
                   </tr>
                 ))
               ) : componentTable.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={6} className="px-5 py-12 text-center text-sm text-slate-400">
                     No component failures in the current filter range.
                   </td>
                 </tr>
@@ -282,23 +335,22 @@ export default function ReliabilityModule() {
                 componentTable.map((row) => (
                   <tr
                     key={`${row.partName}-${row.supplierName}`}
-                    onClick={handleRowClick}
-                    className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                    className="group cursor-pointer transition-colors hover:bg-slate-50"
                   >
-                    <td className="px-4 py-3 font-medium text-slate-700">{row.partName}</td>
-                    <td className="px-4 py-3 text-slate-500">{row.supplierName}</td>
-                    <td className="px-4 py-3 text-slate-500">
+                    <td className="px-5 py-4 font-medium text-slate-700 group-hover:text-sky-700">{row.partName}</td>
+                    <td className="px-5 py-4 text-slate-500">{row.supplierName}</td>
+                    <td className="px-5 py-4 text-slate-500">
                       {row.designB10 !== null ? fmtMiles(row.designB10) : "—"}
                     </td>
-                    <td className="px-4 py-3 text-slate-500">
+                    <td className="px-5 py-4 text-slate-500">
                       {row.actualB10 !== null ? fmtMiles(row.actualB10) : "—"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-4">
                       <VariancePill variance={row.variance} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-4">
                       <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${HAZARD_STYLES[row.hazardStatus]}`}
+                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${HAZARD_STYLES[row.hazardStatus]}`}
                       >
                         {row.hazardStatus}
                       </span>

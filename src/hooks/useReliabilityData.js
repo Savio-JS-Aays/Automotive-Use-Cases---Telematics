@@ -2,17 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useFilterStore } from "../store/useFilterStore";
 
-const PAGE_SIZE = 1000; // Supabase/PostgREST default max rows per request
-const BIN_WIDTH = 10000; // miles per survival / Weibull bin
-const MAX_BINS = 60; // safety cap so a stray outlier can't create thousands of bins
-const MIN_SAMPLE = 5; // below this, a percentile is too noisy to trust
+const PAGE_SIZE = 1000;
+const BIN_WIDTH = 10000;
+const MAX_BINS = 60;
+const MIN_SAMPLE = 5; // Kept only to filter noise out of the "Worst Variance" KPI card
 
-/**
- * PostgREST caps every response (1000 rows by default). A percentile
- * computed on a silently truncated dataset is simply wrong, so page
- * through the full result set. `buildQuery` must return a FRESH query
- * each call (builders are single-use once awaited).
- */
 async function fetchAllRows(buildQuery) {
   const rows = [];
   for (let from = 0; ; from += PAGE_SIZE) {
@@ -24,7 +18,6 @@ async function fetchAllRows(buildQuery) {
   return rows;
 }
 
-/** Linear-interpolated percentile (p in 0..1). Returns null for empty input. */
 function percentile(values, p) {
   const sorted = values
     .map(Number)
@@ -41,30 +34,11 @@ function formatBinLabel(miles) {
   return `${Math.round(miles / 1000)}k`;
 }
 
-// Bin upper edges: 10k, 20k, ... up to the bin covering the max mileage.
 function buildBinEdges(maxMileage) {
   const count = Math.min(MAX_BINS, Math.max(1, Math.ceil(maxMileage / BIN_WIDTH)));
   return Array.from({ length: count }, (_, i) => (i + 1) * BIN_WIDTH);
 }
 
-/**
- * useReliabilityData
- * -------------------
- * Fetches warranty-failure and RUL data scoped by the global `region` and
- * `vehicleModel` filters, then derives the Module 3 actuarial metrics.
- *
- * SCHEMA ASSUMPTIONS (adjust the select strings / filter paths if needed):
- *  - dim_vehicle has a `model` column (used for the vehicleModel filter)
- *  - dim_vehicle has an FK into dim_location, which carries `region_id`
- *  - fact_vehicle_health has a `vehicle_id` FK usable for the dim_vehicle join
- *
- * STATISTICAL CAVEAT: warranty claims contain failures only — there are no
- * right-censored (still-running) units. So the "Kaplan-Meier" curve reduces
- * to the empirical survival function of failed parts, and the B10 is the
- * 10th percentile of observed failure mileage. This biases B10 low versus a
- * censored analysis. If you can supply the active population (e.g. fleet
- * vehicles by mileage), add it as censored observations for a true KM/B10.
- */
 export function useReliabilityData() {
   const region = useFilterStore((s) => s.region);
   const vehicleModel = useFilterStore((s) => s.vehicleModel);
@@ -93,7 +67,6 @@ export function useReliabilityData() {
       setError(null);
 
       try {
-        // ---- Query 1: fact_warranty_claims (failure + Weibull data) ----
         const claimsPromise = fetchAllRows(() =>
           applyFilters(
             supabase.from("fact_warranty_claims").select(
@@ -105,7 +78,6 @@ export function useReliabilityData() {
           )
         );
 
-        // ---- Query 2: fact_vehicle_health (RUL data), same global filters ----
         const healthPromise = fetchAllRows(() =>
           applyFilters(
             supabase.from("fact_vehicle_health").select(
@@ -135,7 +107,6 @@ export function useReliabilityData() {
     };
   }, [region, vehicleModel]);
 
-  // Normalize once: drop rows without a usable mileage.
   const failures = useMemo(
     () =>
       claims
@@ -149,7 +120,6 @@ export function useReliabilityData() {
     [claims]
   );
 
-  // ---- Per part + supplier reliability rows (table + supplier variance KPI) ----
   const componentTable = useMemo(() => {
     const groups = new Map();
     for (const f of failures) {
@@ -172,9 +142,9 @@ export function useReliabilityData() {
           actualB10 !== null && designB10 !== null ? actualB10 - designB10 : null;
         const claimCount = g.mileages.length;
 
-        // Hazard status: how far below (or above) design life the observed B10 sits.
+        // FIXED LOGIC: Removed MIN_SAMPLE strict cutoff for hazardStatus
         let hazardStatus = "On Spec";
-        if (claimCount < MIN_SAMPLE || variance === null) {
+        if (variance === null) {
           hazardStatus = "Insufficient Data";
         } else if (variance < -0.2 * designB10) {
           hazardStatus = "Critical";
@@ -195,21 +165,14 @@ export function useReliabilityData() {
       .sort((a, b) => (a.variance ?? Infinity) - (b.variance ?? Infinity));
   }, [failures]);
 
-  // ---- KPIs ----
   const kpis = useMemo(() => {
-    // 1. Fleet Average RUL
     const rul = healthRows
       .map((r) => Number(r.remaining_useful_life))
       .filter((v) => !Number.isNaN(v));
     const fleetAvgRul = rul.length > 0 ? rul.reduce((s, v) => s + v, 0) / rul.length : null;
 
-    // 2. Actual B10 Life — 10th percentile of all failure mileages
-    const actualB10 = percentile(
-      failures.map((f) => f.mileage),
-      0.1
-    );
+    const actualB10 = percentile(failures.map((f) => f.mileage), 0.1);
 
-    // 3. Top Failing Component — highest claim count by part_name
     const countsByPart = new Map();
     for (const f of failures) {
       countsByPart.set(f.partName, (countsByPart.get(f.partName) ?? 0) + 1);
@@ -219,17 +182,14 @@ export function useReliabilityData() {
       if (!topFailing || count > topFailing.count) topFailing = { name, count };
     }
 
-    // 4. Supplier Variance Risk — worst (most negative) supplier B10 vs design B10,
-    // preferring groups with enough claims to make the percentile meaningful.
     const eligible = componentTable.filter((r) => r.variance !== null);
     const trusted = eligible.filter((r) => r.claimCount >= MIN_SAMPLE);
     const pool = trusted.length > 0 ? trusted : eligible;
-    const worstVariance = pool.length > 0 ? pool[0] : null; // table is sorted ascending
+    const worstVariance = pool.length > 0 ? pool[0] : null; 
 
     return { fleetAvgRul, actualB10, topFailing, worstVariance };
   }, [healthRows, failures, componentTable]);
 
-  // ---- Kaplan-Meier survival curve (empirical, uncensored) ----
   const survivalCurve = useMemo(() => {
     if (failures.length === 0) return [];
     const mileages = failures.map((f) => f.mileage);
@@ -249,9 +209,6 @@ export function useReliabilityData() {
     ];
   }, [failures]);
 
-  // ---- Weibull plot data: cumulative failure % by supplier ----
-  // Percentages are relative to each supplier's own claim count (no
-  // installed-base denominator is available from warranty claims alone).
   const weibull = useMemo(() => {
     if (failures.length === 0) return { rows: [], suppliers: [] };
 
