@@ -1,32 +1,34 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { AlertOctagon, Waves } from "lucide-react";
-import { useDiagnosticsFleetData, useSignalHealthData } from "../../hooks/useDiagnosticsData";
+import { Activity, Fuel, Radio, ShieldCheck } from "lucide-react";
+import { useTelematicsFleetData } from "../../hooks/useTelematicsData";
 import { useFilterStore } from "../../store/useFilterStore";
-import { formatDay } from "../telematics/telematicsFormat";
-import FaultCodesTab from "./FaultCodesTab";
-import SignalHealthTab from "./SignalHealthTab";
-import AssetDiagnosticsView from "./AssetDiagnosticsView";
+import { truckStats } from "./telematicsMetrics";
+import { formatDay } from "./telematicsFormat";
+import UtilizationTab from "./UtilizationTab";
+import FuelEnergyTab from "./FuelEnergyTab";
+import DriverSafetyTab from "./DriverSafetyTab";
+import DataHealthTab from "./DataHealthTab";
+import AssetTelematicsView from "./AssetTelematicsView";
 
 const TABS = [
-  { id: "faults", label: "Fault Codes (DTC)", icon: AlertOctagon },
-  { id: "signals", label: "Signal Health", icon: Waves },
+  { id: "utilization", label: "Utilization & Uptime", icon: Activity, component: UtilizationTab },
+  { id: "fuel", label: "Fuel, Energy & CO₂", icon: Fuel, component: FuelEnergyTab },
+  { id: "safety", label: "Driver Safety", icon: ShieldCheck, component: DriverSafetyTab },
+  { id: "data", label: "Data Health", icon: Radio, component: DataHealthTab },
 ];
 
-function FleetDiagnosticsView() {
+function FleetTelematicsView() {
   const setSelectedVin = useFilterStore((s) => s.setSelectedVin);
   const [params, setParams] = useSearchParams();
   const tabId = TABS.some((t) => t.id === params.get("tab")) ? params.get("tab") : TABS[0].id;
+  const Tab = TABS.find((t) => t.id === tabId).component;
 
-  const { loading, error, raw } = useDiagnosticsFleetData();
-  const signalHealth = useSignalHealthData(raw, tabId === "signals" && !loading);
+  const { loading, error, raw } = useTelematicsFleetData();
+  const trucks = useMemo(() => truckStats(raw), [raw]);
 
-  const openAsset = (vehicleId, signalCode) => {
+  const openAsset = (vehicleId) => {
     if (!vehicleId) return;
-    const next = new URLSearchParams(params);
-    if (signalCode) next.set("signal", signalCode);
-    else next.delete("signal");
-    setParams(next, { replace: true });
     setSelectedVin(vehicleId);
     document.querySelector("main")?.scrollTo({ top: 0 });
   };
@@ -35,7 +37,7 @@ function FleetDiagnosticsView() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-base font-semibold text-slate-800">Vehicle Diagnostics</h1>
+          <h1 className="text-base font-semibold text-slate-800">Fleet Telematics &amp; Operations</h1>
           <p className="text-xs text-slate-500">
             {raw.period
               ? `${raw.vehicles.length} connected trucks · ${formatDay(raw.period.startStr)} – ${formatDay(raw.period.endStr)} (latest data day)`
@@ -61,23 +63,21 @@ function FleetDiagnosticsView() {
 
       {error ? (
         <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          Couldn't load diagnostics: {error.message}
+          Couldn't load telematics data: {error.message}
         </div>
-      ) : tabId === "faults" ? (
-        <FaultCodesTab raw={raw} loading={loading} onOpenAsset={openAsset} />
       ) : (
-        <SignalHealthTab raw={raw} loading={loading} signalHealth={signalHealth} onOpenAsset={openAsset} />
+        <Tab raw={raw} trucks={trucks} loading={loading} onOpenAsset={openAsset} />
       )}
     </div>
   );
 }
 
 /**
- * Vehicle Diagnostics (service-engineer view). Fleet View = Fault Codes and Signal Health tabs
- * over the connected trucks in scope; Asset View (selectedVin set) = one truck's signals, faults,
- * predictions, service history and workshop prep. Formulas: Documentation/metrics/diagnostics.md.
+ * Telematics module. Fleet View = four tabs over the connected trucks in scope; Asset View
+ * (selectedVin set) = one truck's trips, events and 5-minute day trace.
+ * Formulas: Documentation/metrics/telematics.md.
  */
-export default function DiagnosticsModule() {
+export default function TelematicsModule() {
   const selectedVin = useFilterStore((s) => s.selectedVin);
-  return selectedVin ? <AssetDiagnosticsView key={selectedVin} vehicleId={selectedVin} /> : <FleetDiagnosticsView />;
+  return selectedVin ? <AssetTelematicsView key={selectedVin} vehicleId={selectedVin} /> : <FleetTelematicsView />;
 }

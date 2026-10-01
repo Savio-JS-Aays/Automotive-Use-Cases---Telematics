@@ -1,97 +1,128 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useFilterStore } from "../store/useFilterStore";
 
-const PAGE_SIZE = 1000;
-const BIN_WIDTH = 10000;
-const MAX_BINS = 60;
-const MIN_SAMPLE = 5; // Kept only to filter noise out of the "Worst Variance" KPI card
+const PAGE_SIZE = 1000; // PostgREST's default max rows per response
+const PAGE_CONCURRENCY = 6;
+const DATA_SOURCE_TAG = "telematics_sim";
 
-async function fetchAllRows(buildQuery) {
-  const rows = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE_SIZE) break;
+/**
+ * Fetches every row of a filtered query. Counts first, then pulls the pages in parallel
+ * (6 at a time). `apply` must add an ORDER BY on a unique key so pages don't overlap.
+ */
+async function fetchAllRows(table, columns, apply) {
+  const head = await apply(supabase.from(table).select(columns, { count: "exact", head: true }));
+  if (head.error) throw head.error;
+  const pages = Math.ceil((head.count ?? 0) / PAGE_SIZE);
+  const results = new Array(pages);
+  let next = 0;
+  async function worker() {
+    while (next < pages) {
+      const page = next++;
+      const { data, error } = await apply(supabase.from(table).select(columns)).range(
+        page * PAGE_SIZE,
+        page * PAGE_SIZE + PAGE_SIZE - 1
+      );
+      if (error) throw error;
+      results[page] = data ?? [];
+    }
   }
-  return rows;
+  await Promise.all(Array.from({ length: Math.min(PAGE_CONCURRENCY, pages) }, worker));
+  return results.flat();
 }
 
-function percentile(values, p) {
-  const sorted = values
-    .map(Number)
-    .filter((v) => !Number.isNaN(v))
-    .sort((a, b) => a - b);
-  if (sorted.length === 0) return null;
-  const idx = (sorted.length - 1) * p;
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
-}
+const VEHICLE_COLUMNS = `vehicle_id, vin, model_id, model_label, region_id, region_name, powertrain,
+  application_id, application_name, customer_type, production_date, in_service_date`;
 
-function formatBinLabel(miles) {
-  return `${Math.round(miles / 1000)}k`;
-}
+const REPLACEMENT_COLUMNS = `replacement_id, ro_id, vehicle_id, part_id, supplier_id, date_id,
+  odometer_km_at_failure, vehicle_age_days, failure_mode, visit_type, was_predicted, dtc_event_id,
+  in_warranty, part_cost_inr`;
 
-function buildBinEdges(maxMileage) {
-  const count = Math.min(MAX_BINS, Math.max(1, Math.ceil(maxMileage / BIN_WIDTH)));
-  return Array.from({ length: count }, (_, i) => (i + 1) * BIN_WIDTH);
-}
+const EMPTY = {
+  vehicles: [],
+  replacements: [],
+  parts: [],
+  suppliers: [],
+  odometer: [],
+  repairOrders: [],
+  dtcEvents: [],
+  bridge: [],
+  precursor: [],
+  latestDate: null,
+  windowStart: null,
+};
 
+/**
+ * useReliabilityData
+ * ------------------
+ * Component Reliability (quality-engineer view). Lifetime data: every part replacement of the
+ * connected trucks in scope since they entered service, plus each truck's current odometer
+ * (censoring). The global date range does not apply. Formulas live in
+ * `modules/reliability/reliabilityMetrics.js`; see Documentation/metrics/reliability.md.
+ */
 export function useReliabilityData() {
   const region = useFilterStore((s) => s.region);
   const vehicleModel = useFilterStore((s) => s.vehicleModel);
+  const powertrain = useFilterStore((s) => s.powertrain);
+  const application = useFilterStore((s) => s.application);
+  const customerType = useFilterStore((s) => s.customerType);
 
-  const [claims, setClaims] = useState([]);
-  const [healthRows, setHealthRows] = useState([]);
+  const [raw, setRaw] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
 
-    const applyFilters = (query) => {
-      let q = query;
-      if (region && region !== "All Regions") {
-        q = q.eq("dim_vehicle.dim_location.region_id", region);
-      }
-      if (vehicleModel && vehicleModel !== "All Models") {
-        q = q.eq("dim_vehicle.model_id", vehicleModel);
-      }
-      return q;
-    };
-
     async function fetchData() {
       setLoading(true);
       setError(null);
-
       try {
-        const claimsPromise = fetchAllRows(() =>
-          applyFilters(
-            supabase.from("fact_warranty_claims").select(
-              `mileage_at_failure, part_id, supplier_id,
-               dim_part!inner ( part_name, b10_design_life_miles ),
-               dim_supplier!inner ( supplier_name ),
-               dim_vehicle!inner ( model_id, dim_location!inner ( region_id ) )`
-            )
-          )
-        );
+        const vehicles = await fetchAllRows("v_vehicle_context", VEHICLE_COLUMNS, (q) => {
+          let r = q.eq("is_connected", true).order("vehicle_id");
+          if (region !== "All Regions") r = r.eq("region_id", region);
+          if (vehicleModel !== "All Models") r = r.eq("model_id", vehicleModel);
+          if (powertrain !== "All Powertrains") r = r.eq("powertrain", powertrain);
+          if (application !== "All Applications") r = r.eq("application_id", application);
+          if (customerType !== "All Customer Types") r = r.eq("customer_type", customerType);
+          return r;
+        });
+        const ids = vehicles.map((v) => v.vehicle_id);
+        if (ids.length === 0) {
+          if (isMounted) setRaw({ ...EMPTY, vehicles });
+          return;
+        }
 
-        const healthPromise = fetchAllRows(() =>
-          applyFilters(
-            supabase.from("fact_vehicle_health").select(
-              `remaining_useful_life, part_id,
-               dim_vehicle!inner ( model_id, dim_location!inner ( region_id ) )`
-            )
-          )
-        );
+        const [latestRes, firstRes] = await Promise.all([
+          supabase.from("fact_vehicle_daily").select("date_id").in("vehicle_id", ids).order("date_id", { ascending: false }).limit(1),
+          supabase.from("fact_vehicle_daily").select("date_id").in("vehicle_id", ids).order("date_id", { ascending: true }).limit(1),
+        ]);
+        if (latestRes.error) throw latestRes.error;
+        if (firstRes.error) throw firstRes.error;
+        const latestDate = latestRes.data?.[0]?.date_id ?? null;
+        const windowStart = firstRes.data?.[0]?.date_id ?? null;
 
-        const [claimRows, healthData] = await Promise.all([claimsPromise, healthPromise]);
+        const [replacements, parts, suppliers, odometer, repairOrders, dtcEvents, bridge, precursor] = await Promise.all([
+          fetchAllRows("fact_part_replacement", REPLACEMENT_COLUMNS, (q) => q.in("vehicle_id", ids).order("replacement_id")),
+          fetchAllRows("dim_part", "part_id, part_name, part_type, vehicle_subsystem, b10_design_life_miles, unit_cost", (q) => q.order("part_id")),
+          fetchAllRows("dim_supplier", "supplier_id, supplier_name, risk_tier", (q) => q.order("supplier_id")),
+          latestDate
+            ? fetchAllRows("fact_vehicle_daily", "vehicle_id, date_id, odometer_km_end", (q) => q.in("vehicle_id", ids).eq("date_id", latestDate).order("vehicle_id"))
+            : Promise.resolve([]),
+          fetchAllRows("fact_repair_orders", "ro_id, vehicle_id, visit_type, downtime_hours", (q) =>
+            q.eq("data_source", DATA_SOURCE_TAG).in("vehicle_id", ids).neq("visit_type", "planned").order("ro_id")
+          ),
+          fetchAllRows("fact_dtc_event", "dtc_event_id, vehicle_id, dtc_id, status, resolved_by_ro_id, dim_dtc ( spn_description, fmi )", (q) =>
+            q.in("vehicle_id", ids).order("dtc_event_id")
+          ),
+          fetchAllRows("bridge_dtc_part", "dtc_id, part_id, likelihood", (q) => q.order("dtc_id").order("part_id")),
+          fetchAllRows("v_failure_precursor_summary", "replacement_id, vehicle_id, part_id, signal_code, early_mean_abs_z, late_mean_abs_z, max_abs_z, anomalous_days", (q) =>
+            q.in("vehicle_id", ids).order("replacement_id").order("signal_code")
+          ),
+        ]);
 
         if (isMounted) {
-          setClaims(claimRows);
-          setHealthRows(healthData);
+          setRaw({ vehicles, replacements, parts, suppliers, odometer, repairOrders, dtcEvents, bridge, precursor, latestDate, windowStart });
         }
       } catch (err) {
         if (isMounted) setError(err);
@@ -101,146 +132,53 @@ export function useReliabilityData() {
     }
 
     fetchData();
-
     return () => {
       isMounted = false;
     };
-  }, [region, vehicleModel]);
+  }, [region, vehicleModel, powertrain, application, customerType]);
 
-  const failures = useMemo(
-    () =>
-      claims
-        .map((c) => ({
-          mileage: Number(c.mileage_at_failure),
-          partName: c.dim_part?.part_name ?? "Unknown part",
-          designB10: Number(c.dim_part?.b10_design_life_miles),
-          supplierName: c.dim_supplier?.supplier_name ?? "Unknown supplier",
-        }))
-        .filter((f) => !Number.isNaN(f.mileage)),
-    [claims]
-  );
+  return { loading, error, raw };
+}
 
-  const componentTable = useMemo(() => {
-    const groups = new Map();
-    for (const f of failures) {
-      const key = `${f.partName}||${f.supplierName}`;
-      const g = groups.get(key) ?? {
-        partName: f.partName,
-        supplierName: f.supplierName,
-        designB10: f.designB10,
-        mileages: [],
-      };
-      g.mileages.push(f.mileage);
-      groups.set(key, g);
-    }
+/**
+ * usePartPrecursor
+ * ----------------
+ * Daily signal deviation in the 30 days before each failure of one part (Part View precursor
+ * signature). Only replacements inside the telemetry window have rows.
+ */
+export function usePartPrecursor(partId, vehicleIds) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const idsKey = vehicleIds.join(",");
 
-    return Array.from(groups.values())
-      .map((g) => {
-        const actualB10 = percentile(g.mileages, 0.1);
-        const designB10 = Number.isNaN(g.designB10) ? null : g.designB10;
-        const variance =
-          actualB10 !== null && designB10 !== null ? actualB10 - designB10 : null;
-        const claimCount = g.mileages.length;
+  useEffect(() => {
+    let isMounted = true;
+    if (!partId || !idsKey) return undefined;
 
-        // FIXED LOGIC: Removed MIN_SAMPLE strict cutoff for hazardStatus
-        let hazardStatus = "On Spec";
-        if (variance === null) {
-          hazardStatus = "Insufficient Data";
-        } else if (variance < -0.2 * designB10) {
-          hazardStatus = "Critical";
-        } else if (variance < 0) {
-          hazardStatus = "Watch";
-        }
-
-        return {
-          partName: g.partName,
-          supplierName: g.supplierName,
-          designB10,
-          actualB10,
-          variance,
-          claimCount,
-          hazardStatus,
-        };
-      })
-      .sort((a, b) => (a.variance ?? Infinity) - (b.variance ?? Infinity));
-  }, [failures]);
-
-  const kpis = useMemo(() => {
-    const rul = healthRows
-      .map((r) => Number(r.remaining_useful_life))
-      .filter((v) => !Number.isNaN(v));
-    const fleetAvgRul = rul.length > 0 ? rul.reduce((s, v) => s + v, 0) / rul.length : null;
-
-    const actualB10 = percentile(failures.map((f) => f.mileage), 0.1);
-
-    const countsByPart = new Map();
-    for (const f of failures) {
-      countsByPart.set(f.partName, (countsByPart.get(f.partName) ?? 0) + 1);
-    }
-    let topFailing = null;
-    for (const [name, count] of countsByPart) {
-      if (!topFailing || count > topFailing.count) topFailing = { name, count };
-    }
-
-    const eligible = componentTable.filter((r) => r.variance !== null);
-    const trusted = eligible.filter((r) => r.claimCount >= MIN_SAMPLE);
-    const pool = trusted.length > 0 ? trusted : eligible;
-    const worstVariance = pool.length > 0 ? pool[0] : null; 
-
-    return { fleetAvgRul, actualB10, topFailing, worstVariance };
-  }, [healthRows, failures, componentTable]);
-
-  const survivalCurve = useMemo(() => {
-    if (failures.length === 0) return [];
-    const mileages = failures.map((f) => f.mileage);
-    const edges = buildBinEdges(Math.max(...mileages));
-    const total = mileages.length;
-
-    return [
-      { mileage: 0, label: "0", survival: 100 },
-      ...edges.map((edge) => {
-        const failedByEdge = mileages.filter((m) => m <= edge).length;
-        return {
-          mileage: edge,
-          label: formatBinLabel(edge),
-          survival: (1 - failedByEdge / total) * 100,
-        };
-      }),
-    ];
-  }, [failures]);
-
-  const weibull = useMemo(() => {
-    if (failures.length === 0) return { rows: [], suppliers: [] };
-
-    const bySupplier = new Map();
-    for (const f of failures) {
-      const list = bySupplier.get(f.supplierName) ?? [];
-      list.push(f.mileage);
-      bySupplier.set(f.supplierName, list);
-    }
-
-    const suppliers = Array.from(bySupplier.keys());
-    const edges = buildBinEdges(Math.max(...failures.map((f) => f.mileage)));
-
-    const rows = edges.map((edge) => {
-      const row = { mileage: edge };
-      for (const [supplier, mileages] of bySupplier) {
-        const failedByEdge = mileages.filter((m) => m <= edge).length;
-        row[supplier] = (failedByEdge / mileages.length) * 100;
+    async function fetchData() {
+      setLoading(true);
+      setError(null);
+      try {
+        const ids = idsKey.split(",");
+        const data = await fetchAllRows(
+          "v_failure_precursor",
+          "replacement_id, vehicle_id, signal_code, days_before, mean_abs_z, anomalous_readings",
+          (q) => q.eq("part_id", partId).in("vehicle_id", ids).order("replacement_id").order("signal_code").order("days_before")
+        );
+        if (isMounted) setRows(data);
+      } catch (err) {
+        if (isMounted) setError(err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
-      return row;
-    });
+    }
 
-    return { rows, suppliers };
-  }, [failures]);
+    fetchData();
+    return () => {
+      isMounted = false;
+    };
+  }, [partId, idsKey]);
 
-  return {
-    loading,
-    error,
-    kpis,
-    survivalCurve,
-    weibullRows: weibull.rows,
-    weibullSuppliers: weibull.suppliers,
-    componentTable,
-  };
+  return { loading, error, rows };
 }

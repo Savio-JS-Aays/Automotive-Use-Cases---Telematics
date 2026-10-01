@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   Activity,
@@ -10,34 +11,72 @@ import {
   X,
 } from "lucide-react";
 import { useFilterStore } from "../../store/useFilterStore";
+import { supabase } from "../../lib/supabaseClient";
 // ---------------------------------------------------------------------------
 // Nav configuration — one entry per module.
 // ---------------------------------------------------------------------------
 const NAV_ITEMS = [
   { label: "Overview", path: "/", icon: LayoutDashboard },
+    { label: "Telematics", path: "/telematics-data", icon: Activity },
   { label: "Vehicle Diagnostics", path: "/vehicle-diagnostics", icon: Car },
   { label: "Component Reliability", path: "/component-reliability", icon: Cog },
-  { label: "Supply Chain", path: "/supply-chain", icon: Truck },
-  { label: "Financial Data", path: "/financial-warranty", icon: ShieldCheck },
+  //{ label: "Supply Chain", path: "/supply-chain", icon: Truck },
 ];
 
-const DATE_RANGE_OPTIONS = [
-  "Today",
-  "Last 7 Days",
-  "Last 30 Days",
-  "Last 90 Days",
-  "Year to Date",
-];
+const DATE_RANGE_OPTIONS = toOptions(["Last 7 Days", "Last 30 Days", "Last 90 Days"]);
 
-const REGION_OPTIONS = ["All Regions", "North America", "Europe", "APAC", "LATAM"];
+const POWERTRAIN_LABELS = { diesel: "Diesel", bev: "Battery Electric (BEV)" };
 
-const VEHICLE_MODEL_OPTIONS = [
-  "All Models",
-  "EV Sedan",
-  "EV SUV",
-  "Hybrid Van",
-  "Diesel Truck",
-];
+function toOptions(values) {
+  return values.map((v) => ({ value: v, label: v }));
+}
+
+function distinctOptions(rows, valueKey, labelFor, allLabel) {
+  const byValue = new Map();
+  for (const row of rows) {
+    const value = row[valueKey];
+    if (value && !byValue.has(value)) byValue.set(value, labelFor(row));
+  }
+  const options = [...byValue.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([value, label]) => ({ value, label }));
+  return [{ value: allLabel, label: allLabel }, ...options];
+}
+
+// Filter options come from the connected trucks in v_vehicle_context, so they always match the data.
+function useFilterOptions() {
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    supabase
+      .from("v_vehicle_context")
+      .select("region_id, region_name, model_id, model_label, powertrain, application_id, application_name, customer_type")
+      .eq("is_connected", true)
+      .then(({ data, error }) => {
+        if (isMounted && !error) setRows(data ?? []);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  return useMemo(
+    () => ({
+      regions: distinctOptions(rows, "region_id", (r) => r.region_name, "All Regions"),
+      models: distinctOptions(rows, "model_id", (r) => r.model_label, "All Models"),
+      powertrains: distinctOptions(
+        rows,
+        "powertrain",
+        (r) => POWERTRAIN_LABELS[r.powertrain] ?? r.powertrain,
+        "All Powertrains"
+      ),
+      applications: distinctOptions(rows, "application_id", (r) => r.application_name, "All Applications"),
+      customerTypes: distinctOptions(rows, "customer_type", (r) => r.customer_type, "All Customer Types"),
+    }),
+    [rows]
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Reusable sleek select control (Adapted for vertical sidebar)
@@ -53,8 +92,8 @@ function FilterSelect({ label, value, onChange, options }) {
           className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-md text-sm px-3 py-2 pr-8 text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500 transition-colors"
         >
           {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
             </option>
           ))}
         </select>
@@ -80,7 +119,7 @@ function TopNavigation() {
             <Activity className="h-5 w-5" strokeWidth={2} />
           </div>
           <div className="leading-tight">
-            <p className="text-sm font-semibold text-white">Fleet Pulse</p>
+            <p className="text-sm font-semibold text-white">Telematics</p>
           </div>
         </div>
 
@@ -121,12 +160,20 @@ function FilterSidebar() {
   const dateRange = useFilterStore((s) => s.dateRange);
   const region = useFilterStore((s) => s.region);
   const vehicleModel = useFilterStore((s) => s.vehicleModel);
+  const powertrain = useFilterStore((s) => s.powertrain);
+  const application = useFilterStore((s) => s.application);
+  const customerType = useFilterStore((s) => s.customerType);
   const selectedVin = useFilterStore((s) => s.selectedVin);
-  
+
   const setDateRange = useFilterStore((s) => s.setDateRange);
   const setRegion = useFilterStore((s) => s.setRegion);
   const setVehicleModel = useFilterStore((s) => s.setVehicleModel);
+  const setPowertrain = useFilterStore((s) => s.setPowertrain);
+  const setApplication = useFilterStore((s) => s.setApplication);
+  const setCustomerType = useFilterStore((s) => s.setCustomerType);
   const clearSelectedVin = useFilterStore((s) => s.clearSelectedVin);
+
+  const { regions, models, powertrains, applications, customerTypes } = useFilterOptions();
 
   const isAssetView = selectedVin !== null;
 
@@ -177,13 +224,31 @@ function FilterSidebar() {
               label="Region"
               value={region}
               onChange={setRegion}
-              options={REGION_OPTIONS}
+              options={regions}
             />
             <FilterSelect
               label="Vehicle Model"
               value={vehicleModel}
               onChange={setVehicleModel}
-              options={VEHICLE_MODEL_OPTIONS}
+              options={models}
+            />
+            <FilterSelect
+              label="Powertrain"
+              value={powertrain}
+              onChange={setPowertrain}
+              options={powertrains}
+            />
+            <FilterSelect
+              label="Application"
+              value={application}
+              onChange={setApplication}
+              options={applications}
+            />
+            <FilterSelect
+              label="Customer Type"
+              value={customerType}
+              onChange={setCustomerType}
+              options={customerTypes}
             />
           </>
         )}

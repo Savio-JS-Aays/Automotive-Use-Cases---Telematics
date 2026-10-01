@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "db:migrate": "node scripts/telematics-db/setup-telematics-db.mjs migrate",
+    "db:seed": "node scripts/telematics-db/setup-telematics-db.mjs seed",
+    "db:setup": "node scripts/telematics-db/setup-telematics-db.mjs all",
+    "db:reset": "node scripts/telematics-db/setup-telematics-db.mjs reset"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.1",
@@ -28,6 +32,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.6.1",
     "oxlint": "^1.81.0",
+    "pg": "^8.23.1",
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.0"

@@ -3,8 +3,9 @@ import DashboardLayout from './components/layout/DashboardLayout';
 import OverviewModule from './modules/overview/OverviewModule';
 import DiagnosticsModule from './modules/diagnostics/DiagnosticsModule';
 import ReliabilityModule from './modules/reliability/ReliabilityModule';  
-import SupplyChainModule from './modules/supply-chain/SupplyChainModule';
+//import SupplyChainModule from './modules/supply-chain/SupplyChainModule';
 import FinancialWarrantyModule from './modules/financial-warranty/FinancialWarrantyModule'; 
+import TelematicsDataModule from './modules/telematics/TelematicsModule';
 export default function App() {
   return (
     <BrowserRouter>
@@ -13,19 +14,16 @@ export default function App() {
           <Route path="/" element={<OverviewModule />} />
           
           <Route path="/vehicle-diagnostics" element={<DiagnosticsModule />} />
-
-          
           
           <Route path="/component-reliability" element={
             <ReliabilityModule />
           } />
           
-          <Route path="/supply-chain" element={
-            <SupplyChainModule />
-          } />
-          
           <Route path="/financial-warranty" element={
             <FinancialWarrantyModule />
+          } />
+          <Route path="/telematics-data" element={
+            <TelematicsDataModule />
           } />
         </Route>
       </Routes>
