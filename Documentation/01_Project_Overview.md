@@ -69,7 +69,7 @@ See [02_Domain_Theory.md](02_Domain_Theory.md).
 | Module | Route | Purpose | Status |
 |---|---|---|---|
 | Overview | `/` | Fleet risk at a glance, action tracker | **Implemented (new data model)**, 2026-09-30 |
-| Vehicle Diagnostics | `/vehicle-diagnostics` | Service engineer: Fault Codes tab (J1939 Pareto, system × model, lifecycle, active work list), Signal Health tab (truck × signal map, band distribution, aftertreatment, wear forecast, anomaly → DTC lead time); Asset View with signals, DTC timeline, risk trend, workshop prep, service history | **Implemented (new data model)**, 2026-10-01 |
+| Vehicle Diagnostics | `/vehicle-diagnostics` | Service engineer: Fault Codes tab (most common faults, system × model, lifecycle, active work list), Signal Health tab (truck × signal map, band distribution, aftertreatment, wear forecast, anomaly → DTC lead time); Asset View with signals, DTC timeline, risk trend, workshop prep, service history | **Implemented (new data model)**, 2026-10-01 |
 | DTC Analysis | — | J1939 fault analytics | **Merged into Vehicle Diagnostics** (Fault Codes tab), 2026-10-01 |
 | Telematics | `/telematics-data` | Utilization & uptime, fuel / energy / CO₂, driver safety, data health; Asset View with day trace | **Implemented (new data model)**, 2026-10-01 |
 | Component Reliability | `/component-reliability` | Quality engineer: Field Life (Kaplan–Meier, β × η map, hazard, variance master), Supplier & Build Quality (scorecard, tier check, build cohort, where parts fail), Root Cause (failure modes, precursor ramp, DTC → part confirmation); Part View | **Implemented (new data model)**, 2026-10-01. Prediction Performance tab deferred |

@@ -2,7 +2,7 @@
 
 > Stack, code layout, how data flows from Postgres to charts, security, and commands.
 >
-> Last updated: 2026-10-01
+> Last updated: 2026-10-07
 
 ## Stack
 | Layer | Technology |
@@ -21,6 +21,7 @@ my-react-app/
   src/
     main.jsx, App.jsx                      router; all routes nested in DashboardLayout
     components/layout/DashboardLayout.jsx  dark top nav + filter sidebar + <Outlet/>
+    components/layout/TruckSwitcher.jsx    searchable truck picker in the sidebar's Active Vehicle card
     components/kpi/KpiCard.jsx             KPI tile (title, value, icon, tooltip)
     components/ui/ChartHeader.jsx          chart title + InfoTooltip (business meaning)
     store/useFilterStore.js                global filters (Zustand)
@@ -52,7 +53,7 @@ splits the work:
 - Other files in `modules/telematics/`:
   - `TelematicsModule.jsx`: the tab shell, with the tab kept in `?tab=`;
   - one file per tab (`UtilizationTab`, `FuelEnergyTab`, `DriverSafetyTab`, `DataHealthTab`);
-  - `AssetTelematicsView.jsx` and `DriverPanel.jsx`;
+  - `AssetTelematicsView.jsx`;
   - `TelematicsUi.jsx`: shared components (ChartCard, HeatGrid, Segmented, DataTable with
     sort / search / CSV);
   - `telematicsFormat.js`: formatters (₹ lakh / crore), axis styles and pill styles.
@@ -77,7 +78,7 @@ Both modules reuse the Telematics UI kit and formatters by importing
 | `powertrain` | "All Powertrains", `diesel`, `bev` | filters on `dim_v_model.powertrain` |
 | `application` | "All Applications" or an `application_id` | duty cycle, filters on `v_vehicle_context.application_id` (added 2026-10-01) |
 | `customerType` | "All Customer Types" or a `customer_type` (Fleet Operator, Owner-Operator, …) | filters on `v_vehicle_context.customer_type` (added 2026-10-01). Customer *type*, not customer: 189 customers own the 200 connected trucks, so a per-customer filter would be useless |
-| `selectedVin` | `null` / `vehicle_id` | `null` = **Fleet View**; set = **Asset View** (single truck; overrides region/model) |
+| `selectedVin` | `null` / `vehicle_id` | `null` = **Fleet View**; set = **Asset View** (single truck; overrides region/model). In Asset View the sidebar's **Active Vehicle** card holds a searchable truck switcher (VIN, vehicle ID, model, region, application), so you can jump to another truck without going back to the fleet tables. The Asset Views re-mount on a truck change (`key={selectedVin}`) |
 
 - **Options are loaded from the DB.** `DashboardLayout.jsx` (`useFilterOptions`) reads the
   distinct `region_id`/`region_name`, `model_id`/`model_label`, `powertrain`,

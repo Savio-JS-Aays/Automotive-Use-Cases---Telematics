@@ -1,8 +1,7 @@
 import React, { useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
-import { MIN_PRECURSOR_FAILURES, MODE_PALETTE, dtcConfirmation, failureModeMix, precursorMatrix } from "./reliabilityMetrics";
-import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatNumber, formatPct } from "../telematics/telematicsFormat";
-import { ChartCard, ChartSkeleton, DataTable, EmptyChart, HeatGrid, Pill, SingleLineTick } from "../telematics/TelematicsUi";
+import { CLEAR_CAUSE_SHARE, MIN_PRECURSOR_FAILURES, dtcConfirmation, mainCauses, precursorMatrix } from "./reliabilityMetrics";
+import { formatNumber, formatPct } from "../telematics/telematicsFormat";
+import { ChartCard, ChartSkeleton, DataTable, EmptyChart, HeatGrid, Pill } from "../telematics/TelematicsUi";
 
 const SHORT_SIGNAL = {
   AIR_PRESSURE: "Air P",
@@ -27,7 +26,7 @@ function GapPill({ gap }) {
 }
 
 export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }) {
-  const modes = useMemo(() => failureModeMix(lt, summaries), [lt, summaries]);
+  const causes = useMemo(() => mainCauses(lt, summaries), [lt, summaries]);
   const precursor = useMemo(() => precursorMatrix(raw, lt), [raw, lt]);
   const confirmation = useMemo(() => dtcConfirmation(raw, lt), [raw, lt]);
 
@@ -56,26 +55,51 @@ export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard
-          title="Failure-Mode Mix (Top 10 Parts)"
-          tooltip="How each of the most-replaced components failed, from the workshop's failure-mode code. One dominant mode (for example seal leak) gives the supplier a concrete corrective-action target. Click a bar for the Part View."
+          title="Main Failure Cause by Part"
+          tooltip={`The ${causes.rows.length} most-replaced parts, ranked by failures. Under each part: the failure mode that causes most of its failures, from the workshop's failure-mode code. When one mode is ${CLEAR_CAUSE_SHARE} % or more of a part's failures it is flagged "Clear target": a concrete corrective action for the supplier or design team. Hover a row for every mode. Click a row for the Part View.`}
         >
           {loading ? (
             <ChartSkeleton height="h-96" />
-          ) : modes.rows.length === 0 ? (
+          ) : causes.rows.length === 0 ? (
             <EmptyChart height="h-96" message="No failures." />
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(260, modes.rows.length * 32 + 70)}>
-              <BarChart layout="vertical" data={modes.rows} margin={{ left: 8, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="label" width={170} interval={0} tick={<SingleLineTick max={28} />} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip />
-                <Legend verticalAlign="bottom" height={48} iconType="circle" wrapperStyle={LEGEND_STYLE} />
-                {modes.modes.map((m, i) => (
-                  <Bar key={m} dataKey={m} stackId="mode" fill={MODE_PALETTE[i % MODE_PALETTE.length]} onClick={(d) => onOpenPart(d.partId ?? d.payload?.partId)} className="cursor-pointer" />
+            <>
+              <ul className="space-y-3">
+                {causes.rows.map((r) => (
+                  <li key={r.partId}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenPart(r.partId)}
+                      title={r.modes.map((m) => `${m.mode}: ${m.count} (${m.share.toFixed(0)}%)`).join("\n")}
+                      className="group w-full rounded-md px-1 py-0.5 text-left hover:bg-sky-50"
+                    >
+                      <div className="flex items-baseline justify-between gap-3 text-xs">
+                        <span className="truncate font-medium text-slate-700 group-hover:text-sky-700">{r.partName}</span>
+                        <span className="shrink-0 tabular-nums text-slate-500">{r.failures} failures</span>
+                      </div>
+                      <div className="mt-1 h-1.5 rounded bg-slate-100">
+                        <div className="h-1.5 rounded bg-sky-500" style={{ width: `${(r.failures / causes.max) * 100}%` }} />
+                      </div>
+                      {r.main && (
+                        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+                          <span>
+                            Mostly <span className={r.clear ? "font-semibold text-slate-800" : "text-slate-700"}>{r.main.mode}</span> ({r.main.share.toFixed(0)}%)
+                          </span>
+                          {r.clear ? (
+                            <Pill className="bg-amber-50 text-amber-700">Clear target</Pill>
+                          ) : (
+                            r.second && <span className="text-slate-400">then {r.second.mode} ({r.second.share.toFixed(0)}%)</span>
+                          )}
+                        </p>
+                      )}
+                    </button>
+                  </li>
                 ))}
-              </BarChart>
-            </ResponsiveContainer>
+              </ul>
+              <p className="mt-3 text-[11px] text-slate-400">
+                Top {causes.rows.length} parts by failures · {causes.clearCount} with a clear target (one mode ≥ {CLEAR_CAUSE_SHARE}% of the part's failures).
+              </p>
+            </>
           )}
         </ChartCard>
 

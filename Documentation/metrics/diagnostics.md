@@ -44,8 +44,7 @@ below remain valid and the KPI cards still show.
 |---|---|---|
 | `ROLLING_DAYS` | 7 | shared with Telematics |
 | `MATRIX_MIN_TRUCKS` | 5 (a model below this is greyed in the System × Model heatmap) | shared |
-| `PARETO_TOP` | 15 codes | |
-| `HEATMAP_ROWS` | 40 trucks (a toggle shows all) | |
+| `TOP_FAULTS` | 10 faults | |
 | `WEAR_MIN_POINTS` | 5 daily points before a wear slope is used | |
 | `LEAD_LOOKBACK_DAYS` | 30 | |
 | Red lamps | RSL, PL → action "Immediate Service"; AWL, MIL → "Plan Workshop" | |
@@ -55,7 +54,7 @@ below remain valid and the KPI cards still show.
 - **Active DTC:** `fact_dtc_event.status = 'active'`.
 - **Intermittent DTC:** `status = 'previously_active'`, a code that self-healed.
   - It is excluded from the repair KPIs, the rate, the funnel and the lead time.
-  - The Pareto can include it ("+ Intermittent").
+  - Most Common Faults can include it ("+ Intermittent").
 - **New DTC in the period:** `date_id` (first-seen date) lies in the period.
 - **Band state of a value v** against `dim_signal`, taking `direction` into account:
 
@@ -92,13 +91,25 @@ below remain valid and the KPI cards still show.
 | Mean Time to Clear | PERIOD | mean(`cleared_ts − first_seen_ts`) in days, over events whose `cleared_ts` falls in the period. Subtitle: cleared count, and intermittent share = intermittent ÷ all DTCs first seen in the period |
 
 ### Charts and tables
-- **Top Fault Codes (Pareto).** Horizontal bars with a cumulative-% line.
-  - count = `count(*) by dtc_id`, top 15;
-  - cumulative % = running count ÷ total occurrences, over **all** codes;
-  - scope toggle: Period / Active now;
-  - Repairable / + Intermittent toggle;
-  - grey bars are intermittent-only codes;
-  - clicking a bar opens the code drawer.
+- **Most Common Faults.** Simple horizontal bars (replaced "Top Fault Codes (Pareto)" on
+  2026-10-01, which had a cumulative-% line, a second axis and SPN / FMI labels).
+  - **Bar = distinct trucks** that had the fault in scope: `count(distinct vehicle_id) by dtc_id`.
+    A truck that raised the same code five times counts once, so one noisy truck cannot dominate.
+  - Times raised (`count(*)`) and active now (`count(status = 'active')`) are in the tooltip.
+  - Sorted by trucks descending, then by times raised. Top `TOP_FAULTS` = 10.
+  - **Name:** a plain-English name from `FAULT_NAMES` in `diagnosticsMetrics.js` (for example
+    "Front brake lining worn" for `SPN1099-FMI18`). It is display text only. `dim_dtc` keeps the
+    technical description, which the code drawer shows as a subtitle with the SPN / FMI. A code
+    without an entry falls back to its SPN description plus a short FMI phrase.
+  - **Colour:** by the code's `default_lamp`.
+    - Red: RSL or PL, meaning stop or power limited.
+    - Amber: AWL or MIL, meaning service soon.
+    - Grey: codes whose occurrences all self-healed, shown only with "+ Intermittent".
+  - **Takeaway line above the bars:** "{top fault} is the most widespread fault: N of M trucks
+    with a fault." M = distinct trucks with any fault in scope.
+  - **Footnote:** "Showing the top 10 of K faults · M trucks had at least one."
+  - Scope toggle: Period / Active now. Repairable / + Intermittent toggle.
+  - Clicking a bar opens the code drawer, titled with the plain name.
 - **Faults by System × Model.** Heatmap.
   - cell = new non-intermittent DTCs of (model, `dim_dtc.system`) ÷ the model's trucks in scope ×
     100;
@@ -157,7 +168,16 @@ below remain valid and the KPI cards still show.
   - cell colour value = state rank (critical 3, warning 2, outside 1, normal 0) + min(`max_abs_z`
     ÷ 10, 0.9);
   - the number shown is `max_abs_z`;
-  - rows sorted by worst state, then by max |z|; the worst 40 are shown, with a toggle for all;
+  - **all trucks are listed** (the former worst-40 limit and its toggle were removed on
+    2026-10-01); the grid scrolls vertically with a sticky header row;
+  - **sort:** Risk (default), VIN or Model buttons, plus a reverse button (Worst first / Best first,
+    A → Z / Z → A);
+  - **sort by signal:** clicking a signal's column header sorts the trucks by that signal: band
+    state rank (critical 3 … normal 0) × 100 + `max_abs_z`, worst first; clicking again reverses.
+    Trucks without that signal always go last. An arrow marks the active column;
+  - the default **Risk** order is the truck's worst band state × 100 + its max |z| over all its
+    signals, worst first;
+  - the footnote states how many trucks have a warning or critical signal and the active sort;
   - columns are the health signals present that have a normal band;
   - clicking a cell opens Asset View with `?signal=`.
 - **Signals vs Normal Band.** One row per signal on its own scale.
@@ -225,8 +245,10 @@ below remain valid and the KPI cards still show.
   - each bar runs from `first_seen_ts` to `cleared_ts`, or to `last_seen_ts` for intermittent
     codes, or to the latest ping if still active;
   - bars are clipped to the period and coloured by lamp; intermittent codes are faded;
-  - clicking a bar shows the **Freeze Frame** panel (all `freeze_frame` keys, odometer,
-    occurrences, recommended action).
+  - the timeline is full width. There is no standing Freeze Frame card any more (changed on
+    2026-10-01): **clicking a bar opens a freeze-frame popup** with the lamp, severity and derate
+    pills, first seen, odometer, occurrences, every `freeze_frame` key and the recommended
+    action. Esc, the close button or a click outside closes it.
 - **Part Failure Risk Trend.** Weekly (`trigger = 'weekly'`) `failure_probability` × 100 for the
   5 parts with the highest peak probability. Dashed vertical lines mark alert days; a 70 % line
   marks Critical.

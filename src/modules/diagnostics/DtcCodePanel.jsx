@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { ArrowUpRight, ListFilter, X } from "lucide-react";
 import { formatDateTime, formatNumber } from "../telematics/telematicsFormat";
 import { LampPill, SeverityPill } from "./diagnosticsUi";
-import { systemLabel } from "./diagnosticsMetrics";
+import { faultName, systemLabel } from "./diagnosticsMetrics";
 
 function Section({ title, children }) {
   return (
@@ -13,7 +13,7 @@ function Section({ title, children }) {
   );
 }
 
-/** Side drawer with everything about one J1939 fault code (opened from the Pareto). */
+/** Side drawer with everything about one J1939 fault code (opened from Most Common Faults). */
 export default function DtcCodePanel({ detail, onClose, onOpenAsset, onOpenPart, onFilterTable }) {
   const { dim } = detail;
   useEffect(() => {
@@ -31,8 +31,10 @@ export default function DtcCodePanel({ detail, onClose, onOpenAsset, onOpenPart,
             <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               {detail.dtcId} · SPN {dim.spn} / FMI {dim.fmi}
             </p>
-            <h3 className="mt-0.5 text-sm font-semibold text-slate-800">{dim.spn_description}</h3>
-            <p className="text-xs text-slate-500">{dim.fmi_description}</p>
+            <h3 className="mt-0.5 text-sm font-semibold text-slate-800">{faultName({ dtc_id: detail.dtcId, dim_dtc: dim })}</h3>
+            <p className="text-xs text-slate-500">
+              {dim.spn_description}: {dim.fmi_description}
+            </p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700">
             <X className="h-4 w-4" />

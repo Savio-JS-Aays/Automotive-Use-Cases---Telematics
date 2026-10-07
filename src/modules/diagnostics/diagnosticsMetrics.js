@@ -58,8 +58,7 @@ export const BAND_STATES = [
 ];
 const STATE_RANK = Object.fromEntries(BAND_STATES.map((s) => [s.id, s.rank]));
 
-export const PARETO_TOP = 15;
-export const HEATMAP_ROWS = 40;
+export const TOP_FAULTS = 10;
 export const WEAR_MIN_POINTS = 5; // daily points needed before a wear slope is trusted
 export const LEAD_LOOKBACK_DAYS = 30;
 export const LEAD_BUCKETS = [
@@ -171,6 +170,62 @@ export function dtcLabel(e) {
   const d = e.dim_dtc ?? e;
   return d?.spn_description ? `${d.spn_description} · FMI ${d.fmi}` : e.dtc_id;
 }
+
+/** Short plain-English names for every code in `dim_dtc` (display text only; the catalog keeps the technical wording). */
+export const FAULT_NAMES = {
+  "SPN3361-FMI7": "DEF dosing valve not responding",
+  "SPN4364-FMI18": "SCR cleaning exhaust poorly",
+  "SPN5246-FMI15": "SCR inducement: power limited",
+  "SPN111-FMI18": "Coolant level low",
+  "SPN110-FMI16": "Engine running hot",
+  "SPN110-FMI0": "Engine overheating (critical)",
+  "SPN3719-FMI16": "DPF soot filling up",
+  "SPN3251-FMI0": "DPF clogged",
+  "SPN3719-FMI0": "DPF overloaded (critical)",
+  "SPN168-FMI18": "Battery voltage low",
+  "SPN168-FMI1": "Charging system failure",
+  "SPN651-FMI7": "Fuel injector misfiring",
+  "SPN651-FMI5": "Fuel injector circuit open",
+  "SPN102-FMI18": "Turbo boost pressure low",
+  "SPN641-FMI7": "Turbo actuator stuck",
+  "SPN1099-FMI18": "Front brake lining worn",
+  "SPN117-FMI18": "Brake air pressure low",
+  "SPN117-FMI1": "Brake air pressure critically low",
+  "SPN520210-FMI16": "HV battery running hot",
+  "SPN520210-FMI0": "HV battery overheating (critical)",
+  "SPN520211-FMI18": "HV battery health low",
+  "SPN84-FMI2": "Wheel-speed sensor glitch",
+  "SPN639-FMI2": "Data-bus communication glitch",
+  "SPN96-FMI2": "Fuel-level sensor glitch",
+  "SPN3031-FMI2": "DEF-tank temperature sensor glitch",
+  "SPN523-FMI2": "Gear-position sensor glitch",
+  "SPN91-FMI3": "Accelerator pedal sensor fault",
+};
+
+const FMI_PHRASES = { 0: "too high", 1: "too low", 2: "erratic", 3: "voltage high", 4: "voltage low", 5: "open circuit", 7: "not responding", 15: "high", 16: "high", 18: "low" };
+
+/** Plain-English fault name; unknown codes fall back to the SPN description plus a short FMI phrase. */
+export function faultName(e) {
+  const d = e?.dim_dtc ?? e ?? {};
+  const id = e?.dtc_id ?? d.dtc_id;
+  if (FAULT_NAMES[id]) return FAULT_NAMES[id];
+  if (d.spn_description) return `${d.spn_description}${FMI_PHRASES[d.fmi] ? `: ${FMI_PHRASES[d.fmi]}` : ""}`;
+  return id ?? "Unknown fault";
+}
+
+/** Bar colour and wording for a fault's lamp: stop or power limited, or service soon. */
+export const FAULT_TONES = {
+  stop: { color: "#e11d48", label: "Stop or power limited" },
+  soon: { color: "#f59e0b", label: "Service soon" },
+  glitch: { color: "#cbd5e1", label: "Self-healing glitch" },
+};
+export const LAMP_MEANING = {
+  RSL: "Red stop lamp: stop safely",
+  PL: "Protect lamp: power limited",
+  AWL: "Amber warning lamp: service soon",
+  MIL: "Malfunction lamp: emissions fault",
+};
+export const faultTone = (lamp) => (RED_LAMPS.has(lamp) ? "stop" : "soon");
 
 export function systemLabel(system) {
   return SYSTEM_LABELS[system] ?? system ?? "Other";
@@ -292,28 +347,44 @@ export function dtcRateTrend(raw) {
   });
 }
 
-/** Pareto of fault codes. scope: "period" (first seen in period) or "active" (active now). */
-export function dtcPareto(raw, { scope, includeIntermittent }) {
+/**
+ * Most common faults: distinct trucks that had each code. scope: "period" (first seen in the
+ * period) or "active" (active now). Intermittent codes are left out unless asked for.
+ */
+export function topFaults(raw, { scope, includeIntermittent }) {
   const events = raw.dtcEvents.filter((e) => {
     if (!includeIntermittent && isIntermittent(e)) return false;
     return scope === "active" ? e.status === "active" : inCurrent(raw.period, e.date_id);
   });
   const byCode = new Map();
+  const fleet = new Set();
   for (const e of events) {
-    const g = byCode.get(e.dtc_id) ?? { dtcId: e.dtc_id, label: dtcLabel(e), system: e.dim_dtc?.system, lamp: e.dim_dtc?.default_lamp, count: 0, trucks: new Set(), intermittent: 0 };
+    fleet.add(e.vehicle_id);
+    const g = byCode.get(e.dtc_id) ?? {
+      dtcId: e.dtc_id,
+      name: faultName(e),
+      spn: e.dim_dtc?.spn,
+      fmi: e.dim_dtc?.fmi,
+      system: e.dim_dtc?.system,
+      lamp: e.dim_dtc?.default_lamp,
+      count: 0,
+      active: 0,
+      trucks: new Set(),
+      intermittent: 0,
+    };
     g.count += 1;
+    if (e.status === "active") g.active += 1;
     g.trucks.add(e.vehicle_id);
     if (isIntermittent(e)) g.intermittent += 1;
     byCode.set(e.dtc_id, g);
   }
-  const all = [...byCode.values()].sort((a, b) => b.count - a.count);
-  const total = events.length;
-  let running = 0;
-  const rows = all.slice(0, PARETO_TOP).map((g) => {
-    running += g.count;
-    return { ...g, trucks: g.trucks.size, cumPct: total ? (running / total) * 100 : 0 };
-  });
-  return { rows, total, codes: all.length };
+  const all = [...byCode.values()]
+    .map((g) => {
+      const glitch = g.intermittent === g.count;
+      return { ...g, trucks: g.trucks.size, glitch, tone: glitch ? "glitch" : faultTone(g.lamp) };
+    })
+    .sort((a, b) => b.trucks - a.trucks || b.count - a.count);
+  return { rows: all.slice(0, TOP_FAULTS), codes: all.length, fleetTrucks: fleet.size, total: events.length };
 }
 
 /** Faults per 100 trucks by model (rows) × system (cols), for DTCs first seen in the period. */
@@ -615,6 +686,29 @@ export function signalHeatmap(fleetRaw, sig, latest, signals) {
     return { vehicleId: v.vehicle_id, vin: v.vin, modelLabel: v.model_label, cells, worst, maxZ, score: worst * 100 + maxZ };
   });
   return trucks.filter((t) => Object.keys(t.cells).length > 0).sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Sort the truck × signal rows. key: "risk" (worst band state, then max |z|), "vin", "model",
+ * or a signal_code (that signal's band state, then |z|; trucks without the signal go last).
+ * dir: "desc" puts the worst first for risk and signals; for "vin" / "model" "asc" is A → Z.
+ */
+export function sortHeatmap(trucks, key, dir) {
+  const sign = dir === "asc" ? 1 : -1;
+  const value = (t) => {
+    if (key === "risk") return t.score;
+    if (key === "vin") return String(t.vin ?? t.vehicleId);
+    if (key === "model") return `${t.modelLabel ?? ""} ${t.vin ?? t.vehicleId}`;
+    const c = t.cells[key];
+    return c ? (STATE_RANK[c.state] ?? 0) * 100 + c.z : null;
+  };
+  return [...trucks].sort((a, b) => {
+    const va = value(a);
+    const vb = value(b);
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    return (va < vb ? -1 : va > vb ? 1 : 0) * sign || String(a.vin).localeCompare(String(b.vin));
+  });
 }
 
 /** Distribution of each signal's latest value across trucks vs its normal band. */

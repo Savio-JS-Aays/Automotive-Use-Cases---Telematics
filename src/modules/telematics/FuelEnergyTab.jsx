@@ -26,8 +26,8 @@ import {
   evStats,
   fuelKpis,
   fuelSplitByApplication,
+  idleByGroup,
   modelBenchmark,
-  worstIdleTrucks,
 } from "./telematicsMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatInr, formatNumber, formatPct, truncateString } from "./telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, LocalSelect, Segmented } from "./TelematicsUi";
@@ -69,7 +69,8 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
   const unit = mode === "bev" ? "kWh/100 km" : "L/100 km";
   const trend = useMemo(() => consumptionTrend(raw, mode), [raw, mode]);
   const scatter = useMemo(() => consumptionVsLoad(raw, mode, Number(minKm)), [raw, mode, minKm]);
-  const worstIdle = useMemo(() => worstIdleTrucks(trucks), [trucks]);
+  const [idleBy, setIdleBy] = useState("model");
+  const idleGroups = useMemo(() => idleByGroup(trucks, idleBy), [trucks, idleBy]);
   const split = useMemo(() => fuelSplitByApplication(raw), [raw]);
   const benchmark = useMemo(() => modelBenchmark(raw), [raw]);
   const ev = useMemo(() => (kpis.hasBev ? evStats(raw, Number(minKm)) : null), [raw, kpis.hasBev, minKm]);
@@ -192,25 +193,44 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
         </ChartCard>
 
         <ChartCard
-          title="Worst 10 Trucks by Idle Share"
+          title="Idle Share by Model and Region"
           badge="PERIOD"
-          tooltip="Trucks with the highest idle hours ÷ engine-on hours (at least 10 engine hours in the period). Tooltip shows the idle cost. Click a bar to open the truck."
+          tooltip="Σ idle hours ÷ Σ engine-on hours per model or per region, with the fleet average as a dashed line. Aggregated groups show where duty cycle or site practice drives idling, which a single truck cannot. Tooltip adds the diesel idle cost per truck per month; BEVs burn no fuel, so they carry no cost."
+          actions={
+            <Segmented
+              value={idleBy}
+              onChange={setIdleBy}
+              options={[{ value: "model", label: "By Model" }, { value: "region", label: "By Region" }]}
+            />
+          }
         >
           {loading ? (
             <ChartSkeleton />
-          ) : worstIdle.length === 0 ? (
-            <EmptyChart message="Not enough engine hours to rank trucks." />
+          ) : idleGroups.rows.length === 0 ? (
+            <EmptyChart message="No engine hours in this period." />
           ) : (
             <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={worstIdle} layout="vertical" margin={{ left: 4, right: 16 }}>
+              <BarChart data={idleGroups.rows} layout="vertical" margin={{ left: 4, right: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="label" width={150} tickFormatter={(v) => truncateString(v, 20)} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
+                <XAxis type="number" unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} domain={[0, "auto"]} />
+                <YAxis type="category" dataKey="label" width={150} tickFormatter={(v) => truncateString(v, 22)} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
                 <RechartsTooltip
                   cursor={{ fill: "#f8fafc" }}
-                  formatter={(v, _n, item) => [`${v}% · ${item.payload.idleH} h · ${formatInr(item.payload.idleCostInr)}`, item.payload.modelLabel]}
+                  formatter={(v, _n, item) => {
+                    const g = item.payload;
+                    const cost = g.idleCostInr === null ? "no fuel cost (BEV)" : `${formatInr(g.idleCostInr)} · ${formatInr(g.costPerTruckMonthInr)} per truck / month`;
+                    return [`${v}% · ${formatNumber(g.idleH)} idle h · ${g.trucks} trucks · ${cost}`, "Idle share"];
+                  }}
                 />
-                <Bar dataKey="idlePct" fill="#f59e0b" radius={[0, 3, 3, 0]} className="cursor-pointer" onClick={(d) => onOpenAsset(d.vehicleId ?? d.payload?.vehicleId)} />
+                {idleGroups.fleetPct !== null && (
+                  <ReferenceLine
+                    x={idleGroups.fleetPct}
+                    stroke="#64748b"
+                    strokeDasharray="4 4"
+                    label={{ value: `Fleet ${idleGroups.fleetPct.toFixed(1)}%`, position: "insideTopRight", fontSize: 10, fill: "#64748b" }}
+                  />
+                )}
+                <Bar dataKey="idlePct" fill="#f59e0b" radius={[0, 3, 3, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -219,7 +239,7 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
         <ChartCard
           title={`Consumption vs Load (${unit})`}
           badge="PERIOD"
-          tooltip="Each dot is a trip: average gross combination weight (x) against consumption (y), with a fitted line per model. Shows how each model's efficiency scales with payload: the core product-benchmark view for the OEM. Short trips are excluded because start-up fuel distorts them."
+          tooltip="Each dot is a trip: average gross combination weight (x) against consumption (y), coloured by model. Shows how each model's efficiency scales with payload: the core product-benchmark view for the OEM. Short trips are excluded because start-up fuel distorts them."
           actions={
             <>
               {modeToggle}
@@ -247,9 +267,7 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
                       name={s.label}
                       data={s.points}
                       fill={s.color}
-                      fillOpacity={0.45}
-                      line={{ stroke: s.color, strokeWidth: 2 }}
-                      lineType="fitting"
+                      fillOpacity={0.55}
                       className="cursor-pointer"
                       onClick={(p) => onOpenAsset(p.vehicleId ?? p.payload?.vehicleId)}
                     />
@@ -257,7 +275,7 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
                 </ScatterChart>
               </ResponsiveContainer>
               <p className="mt-2 text-[11px] text-slate-400">
-                {scatter.reduce((s, m) => s + m.total, 0).toLocaleString("en-IN")} trips; dense models are sampled for display, and the fitted lines use the sample.
+                {scatter.reduce((s, m) => s + m.total, 0).toLocaleString("en-IN")} trips; dense models are sampled for display.
               </p>
             </>
           )}

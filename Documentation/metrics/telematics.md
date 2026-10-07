@@ -6,7 +6,7 @@
 > - Code:
 >   - `src/hooks/useTelematicsData.js` (fetch);
 >   - `src/modules/telematics/telematicsMetrics.js` (every formula, pure functions);
->   - `src/modules/telematics/*Tab.jsx`, `AssetTelematicsView.jsx`, `DriverPanel.jsx` (UI).
+>   - `src/modules/telematics/*Tab.jsx`, `AssetTelematicsView.jsx` (UI).
 > - Module status: **Implemented (new data model)**, 2026-10-01. Nav link: "Telematics".
 > - Audience: fleet manager (utilization, fuel), safety manager (drivers), OEM connected
 >   services (data health), OEM product / pre-sales (model benchmark).
@@ -67,7 +67,6 @@ in ~5–6 s over the network with no filters (measured 2026-10-01).
 | `MIN_PREV_COVERAGE` | 0.8 | delta rule |
 | `SILENT_HOURS` | 48 | stale-report threshold (same as the Overview) |
 | `LOW_COMPLETENESS_PCT` | 90 | connectivity watchlist |
-| `IDLE_RANKING_MIN_ENGINE_H` | 10 | minimum engine hours for the idle ranking |
 | `OVERSPEED_LIMIT_KMH` | 80 | reference line (Indian HGV governed speed) |
 
 **Decision (2026-10-01): idle waste cost** = measured `idle_fuel_l × ₹90`. This replaces the
@@ -179,18 +178,39 @@ scope.
 - **Reference:** dashed line = `dim_v_model.base_consumption` (rated).
 - **Local filter:** Diesel L / BEV kWh toggle.
 
-**Worst 10 Trucks by Idle Share** (horizontal bar)
-- **Formula:** idlePct per truck, among trucks with ≥ 10 engine hours.
-- **Tooltip:** idle hours and ₹ cost.
-- **Drill-down:** click → Asset View.
+**Idle Share by Model and Region** (horizontal bar; replaced "Worst 10 Trucks by Idle Share" on 2026-10-01)
+- **Why:** a ranking of individual trucks is not actionable for a fleet or OEM audience. Idling
+  is driven by duty cycle (model / application) and site practice (region), so the chart
+  aggregates to those groups.
+- **Formula:** per group, `Σ idle_hours ÷ Σ engine_hours × 100`: a ratio of sums, so a truck that
+  runs more hours weighs more. Trucks with no days in the period are skipped.
+- **Local filter:** By Model (default) / By Region. Bars are sorted highest first.
+- **Reference line:** the fleet idle share, the same ratio over all trucks in scope.
+- **Tooltip:** idle share, idle hours, trucks in the group, diesel idle cost `Σ idle_fuel_l × ₹90`
+  and the cost per truck-month `idle cost ÷ diesel truck-days × 30`. BEV-only groups (eActros) show
+  "no fuel cost (BEV)", because they burn no fuel.
+- **Cost scope:** diesel trucks only, so a mixed group's cost covers its diesel trucks.
+- **Global filters:** all apply. With a region filter set, By Region shows a single bar.
+- **No drill-down:** groups are not clickable.
+- **Reading it on the seeded data (last 30 days):** model matters, region barely does.
 
-**Consumption vs Load** (scatter per model, fitted line)
+  | Group | Idle share |
+  |---|---|
+  | 3528C | 30.5 % |
+  | 1617R | 16.2 % |
+  | 5528TT | 13.8 % |
+  | eActros 600 | 12.2 % |
+  | Actros L | 11.3 % |
+  | Regions | 14–17 % (East highest) |
+
+**Consumption vs Load** (scatter per model, dots only)
 - **One dot per trip:** x = `avg_gcw_kg ÷ 1000` (t), y = `fuel_used_l` (or `energy_used_kwh`)
   `÷ distance_km × 100`.
 - **Local filters:**
   - Diesel / BEV toggle;
   - minimum trip length (≥ 5 / 20 / 50 / 100 km, default 20).
-- **Display cap:** each model is stride-sampled to ≤ 400 points; the fitted line uses the sample.
+- **No trend lines (2026-10-01):** dots are coloured by model, with no fitted line through them.
+- **Display cap:** each model is stride-sampled to ≤ 400 points for display.
 - **Drill-down:** click → Asset View.
 
 **Diesel Split: Driving / Idle / PTO by Application** (100 % stacked bar)
@@ -229,7 +249,7 @@ scope.
 
 ## Tab 3 · Driver Safety
 ### Local filter bar
-Applies to event counts, rates, event mix and the scorecard's event columns. The safety score is
+Applies to event counts, rates, event mix and the scorecard's event columns, and to the groups in both group views. The safety score is
 computed from penalties by the simulator, so it ignores the event filter.
 
 **Event families** (multi-select chips):
@@ -243,8 +263,10 @@ computed from penalties by the simulator, so it ignores the event filter.
 
 **Other controls:**
 - **Severity:** all / high / medium / low.
-- **"Rank drivers with":** ≥ 100 / 500 (default) / 1,000 / 3,000 km. Used by the rankings,
-  distribution, quadrant and scorecard to exclude small samples.
+- **Group by:** Model (default) / Application / Region. Drives the Safety Risk chart and the
+  Safety Scorecard.
+- **"Rate drivers with":** ≥ 100 / 500 (default) / 1,000 / 3,000 km. Used by the score
+  distribution, the quadrant and the Coach-now % column, to exclude small samples.
 - **Event:** a single type, set by clicking a matrix cell and shown as a chip.
 
 ### KPIs
@@ -260,77 +282,60 @@ computed from penalties by the simulator, so it ignores the event filter.
 **Event Rate by Family** (stacked area)
 - **Formula:** per family, `7-day Σ events ÷ 7-day Σ km × 1000`.
 
-**Worst 10 Drivers by Safety Score** (horizontal bar)
-- **Formula:** distance-weighted `safety_score` of the vehicle-days assigned to the driver
-  (`fact_vehicle_daily.driver_id`), among drivers above the km threshold.
-- **Colours:** red < 70, amber 70–85, green ≥ 85.
-- **Drill-down:** click → driver panel.
+**Safety Risk by Model / Application / Region** (stacked horizontal bar; replaced "Worst 10 Drivers by Safety Score" on 2026-10-01)
+- **Why:** per-driver rankings are not useful for an OEM audience. Risk comes from the truck, the
+  duty cycle and the region, so the chart compares groups.
+- **Groups come from the vehicle** (`v_vehicle_context`): `model_label`, `application_name` or
+  `region_name`. Daily rows, events and trips all carry `vehicle_id`, so no driver mapping is
+  needed.
+- **Formula:** per group, `count(filtered events) ÷ Σ distance_km × 1000`, stacked by event family
+  (`events of family ÷ Σ distance_km × 1000`). Sorted highest rate first.
+- **Why events per 1,000 km and not the safety score:** group scores average out to a narrow band
+  (about 82–88 on the seeded data), which looks flat. The event rate is zero-based and shows the
+  spread (about 12 for mining and about 5 for freight). The score is in the tooltip and the table.
+- **Reference line:** the fleet rate, `Σ events ÷ Σ km × 1000` over all groups in scope.
+- **Tooltip:** rate, safety score, the rate per family, trucks, distance, high-severity share,
+  and a note when the group has fewer than 5 trucks.
+- **Colours:** the event-family colours.
+- **Filters:** event family, severity, group by, and all global filters.
 
 **Event Type × Severity** (heat grid)
 - **Formula:** counts in the period. The grid ignores the local filter, because it *is* one.
 - **Drill-down:** click → sets event type + severity for the whole tab.
 
 **Driver Safety Score Distribution** (bar)
-- **Formula:** drivers per 5-point bin (< 60 … 95+), coloured by band.
-- **Drill-down:** click → scorecard filtered to that band.
+- **Formula:** drivers per 5-point bin (< 60 … 95+), coloured by band. A count per band with no
+  names; it shows how much of the driver pool needs coaching.
+- **No click-through** (it used to filter the driver scorecard).
 
 **Coaching Quadrant: Eco vs Safety** (bubble) _(hidden 2026-10-01: `SHOW.coachingQuadrant` in DriverSafetyTab.jsx)_
 - **One bubble per driver:** x = eco (trips), y = safety, size = km.
 - **Split lines:** safety 85, eco 70.
-- **Drill-down:** click → driver panel.
+- **No click-through.** The driver panel was removed (2026-10-01).
 
 **Time in Speed Bands** (100 % stacked bar)
 - **Formula:** `Σ speed_class_s` per band (0–30, 30–50, 50–70, 70–80, > 80 km/h) ÷ total.
 - **Local filter:** by application or by model.
 
-### Table: Driver Scorecard
-- **Columns:** alias, band pill, safety, Δ safety, eco, distance, events / 1k km, top event type,
-  trucks driven.
-- **Δ safety** = current − previous period, shown when the previous period has ≥ 3 days for the
-  driver.
-- **Controls:** search, sort (default safety ascending), CSV.
-- **Drill-down:** row → driver panel.
+### Table: Safety Scorecard by Model / Application / Region
+Replaces "Driver Scorecard" (2026-10-01). One row per group, following the Group by toggle.
 
-### Driver panel (drawer)
-**Sources:**
-- safety and km from `fact_vehicle_daily.driver_id`;
-- events from `fact_harsh_events.driver_id`;
-- driving style from `fact_trip.driver_id` (relief drivers are counted on the trips they
-  drove).
-
-**Stat tiles**
-
-| Tile | Formula |
+| Column | Formula |
 |---|---|
-| Safety, eco, km, events / 1k km | as in the scorecard |
-| RPM green band | `Σ(rpm_green_band_pct × drive_s) ÷ Σ drive_s` (BEV: coasting %) |
-| Cruise | distance-weighted `cruise_distance_pct` |
-| Idle | `Σ idle_s ÷ (Σ drive_s + Σ idle_s)` |
-| Brakes / 100 km | `Σ brake_applications ÷ Σ km × 100` |
+| Group | model, application or region |
+| Band | pill from the group's safety score: Coach now < 70, Watch 70–85, Good ≥ 85. "Not rated" when the group has fewer than 5 trucks |
+| Safety | distance-weighted daily `safety_score` over the group's vehicle-days |
+| Δ | current − previous period, shown when the previous period has ≥ 3 vehicle-days for the group |
+| Eco | trip `eco_score` weighted by `distance_km` |
+| Distance, Trucks | `Σ distance_km`; trucks with km > 0 |
+| Drivers | distinct `driver_id` on the group's vehicle-days |
+| Events / 1k km | `count(filtered events) ÷ Σ km × 1000` |
+| High severity | `high-severity events ÷ filtered events` |
+| Top Event | most frequent filtered event type |
+| Coach now | share of the group's drivers (those with at least the "Rate drivers with" km in the group) whose distance-weighted safety is below 70. A percentage only: nobody is named |
 
-**Weekly safety** (line)
-- **Formula:** distance-weighted, per ISO week.
-- **Reference lines:** 70 and 85.
-
-**Event mix**
-- **Formula:** counts by type, following the event filter.
-
-**Trucks driven**
-- **Content:** the driver's trucks with km.
-- **Drill-down:** click → Asset View.
-
-**Coaching focus** (plain-language tips, compared with fleet medians):
-
-| Tip | Shown when |
-|---|---|
-| Top event type | always (its share of the driver's events) |
-| Brakes / 100 km | > 1.3 × median |
-| Green band % | < median − 10 pp (diesel only) |
-| Idle % | > 1.3 × median |
-| Cruise % | < median − 10 pp |
-| Overspeed s / 100 km | > 1.5 × max(median, 1) |
-
-**Privacy:** aliases only, with a GDPR note in the panel.
+- **Controls:** search, sort (default events / 1k km descending), CSV.
+- **No drill-down:** groups are not click targets.
 
 ---
 
@@ -425,7 +430,7 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 - **Data:** completeness 96.2 %; East is weakest at 91.8 %.
 - **Model benchmark:** 3528C is +48.5 % over rated (tipper / mining duty cycle, 30 % idle);
   eActros is −3.6 %.
-- **App run:** headless Chromium on every tab, the driver panel, the Asset View and the BEV-only
+- **App run:** headless Chromium on every tab, the Asset View and the BEV-only
   filter showed no console errors.
 
 ## Known issues / limitations

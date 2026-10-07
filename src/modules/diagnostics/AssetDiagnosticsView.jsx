@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, parseISO } from "date-fns";
-import { AlertOctagon, ArrowLeft, ClipboardCopy, Gauge, Radio, ShieldAlert, SlidersHorizontal, Timer, Truck, Wrench } from "lucide-react";
+import { AlertOctagon, ArrowLeft, ClipboardCopy, Gauge, Radio, ShieldAlert, SlidersHorizontal, Timer, Truck, Wrench, X } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -111,6 +111,57 @@ function DtcGantt({ timeline, selected, onSelect }) {
       <div className="flex justify-between text-[10px] text-slate-400" style={{ marginLeft: "14.5rem" }}>
         <span>{formatDay(dayOf(min))}</span>
         <span>{formatDay(dayOf(max))}</span>
+      </div>
+    </div>
+  );
+}
+
+function FreezeFrameModal({ event, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+      <button type="button" aria-label="Close" className="absolute inset-0 bg-slate-900/30" onClick={onClose} />
+      <div role="dialog" aria-label="Freeze frame" className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white shadow-2xl">
+        <div className="sticky top-0 flex items-start justify-between gap-3 border-b border-slate-100 bg-white px-5 py-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Freeze frame</p>
+            <h3 className="mt-0.5 text-sm font-semibold text-slate-800">{dtcLabel(event)}</h3>
+            <p className="text-[11px] text-slate-400">
+              {event.dtc_id} · {systemLabel(event.dim_dtc?.system)} · {event.dim_dtc?.ecu_name}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-3 px-5 py-4 text-sm">
+          <div className="flex flex-wrap gap-1.5">
+            <LampPill lamp={event.lamp_status} />
+            <SeverityPill severity={event.dim_dtc?.severity_class} />
+            {event.caused_derate && <Pill className="bg-rose-100 text-rose-700">derate</Pill>}
+          </div>
+          <p className="text-[11px] text-slate-400">Operating snapshot the ECU recorded when this fault code was set.</p>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <dt className="text-slate-500">First seen</dt>
+            <dd className="text-right text-slate-700">{formatDateTime(event.first_seen_ts)}</dd>
+            <dt className="text-slate-500">Odometer</dt>
+            <dd className="text-right text-slate-700">{formatNumber(event.odometer_km_at_first)} km</dd>
+            <dt className="text-slate-500">Occurrences</dt>
+            <dd className="text-right text-slate-700">{event.occurrence_count}</dd>
+            {Object.entries(event.freeze_frame ?? {}).map(([k, val]) => (
+              <React.Fragment key={k}>
+                <dt className="text-slate-500">{freezeLabel(k)}</dt>
+                <dd className="text-right tabular-nums text-slate-700">{val === null ? "—" : formatNumber(val, 1)}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+          {!event.freeze_frame && <p className="text-xs text-slate-400">No freeze frame was recorded for this code.</p>}
+          <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-slate-700">{event.dim_dtc?.recommended_action}</p>
+        </div>
       </div>
     </div>
   );
@@ -290,57 +341,22 @@ export default function AssetDiagnosticsView({ vehicleId }) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <ChartCard
-          className="xl:col-span-2"
-          title="Fault Code Timeline"
-          badge="PERIOD"
-          tooltip="Each fault code on this truck from first seen to cleared (or now), coloured by lamp. Faded bars are intermittent codes that self-healed. Click a bar for its freeze frame."
-        >
-          {loading ? (
-            <ChartSkeleton height="h-40" />
-          ) : timeline.bars.length === 0 ? (
-            <EmptyChart height="h-40" message="No fault codes in this period." />
-          ) : (
+      <ChartCard
+        title="Fault Code Timeline"
+        badge="PERIOD"
+        tooltip="Each fault code on this truck from first seen to cleared (or now), coloured by lamp. Faded bars are intermittent codes that self-healed. Click a bar to open its freeze frame."
+      >
+        {loading ? (
+          <ChartSkeleton height="h-40" />
+        ) : timeline.bars.length === 0 ? (
+          <EmptyChart height="h-40" message="No fault codes in this period." />
+        ) : (
+          <>
             <DtcGantt timeline={timeline} selected={selectedDtc} onSelect={setSelectedDtc} />
-          )}
-        </ChartCard>
-
-        <ChartCard title="Freeze Frame" tooltip="Operating snapshot the ECU recorded when the selected fault code was set.">
-          {!selectedEvent ? (
-            <EmptyChart height="h-40" message="Select a fault code on the timeline." />
-          ) : (
-            <div className="space-y-3 text-sm">
-              <div>
-                <p className="font-semibold text-slate-700">{dtcLabel(selectedEvent)}</p>
-                <p className="text-[11px] text-slate-400">
-                  {selectedEvent.dtc_id} · {systemLabel(selectedEvent.dim_dtc?.system)} · {selectedEvent.dim_dtc?.ecu_name}
-                </p>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  <LampPill lamp={selectedEvent.lamp_status} />
-                  <SeverityPill severity={selectedEvent.dim_dtc?.severity_class} />
-                  {selectedEvent.caused_derate && <Pill className="bg-rose-100 text-rose-700">derate</Pill>}
-                </div>
-              </div>
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                <dt className="text-slate-500">First seen</dt>
-                <dd className="text-right text-slate-700">{formatDateTime(selectedEvent.first_seen_ts)}</dd>
-                <dt className="text-slate-500">Odometer</dt>
-                <dd className="text-right text-slate-700">{formatNumber(selectedEvent.odometer_km_at_first)} km</dd>
-                <dt className="text-slate-500">Occurrences</dt>
-                <dd className="text-right text-slate-700">{selectedEvent.occurrence_count}</dd>
-                {Object.entries(selectedEvent.freeze_frame ?? {}).map(([k, val]) => (
-                  <React.Fragment key={k}>
-                    <dt className="text-slate-500">{freezeLabel(k)}</dt>
-                    <dd className="text-right tabular-nums text-slate-700">{val === null ? "—" : formatNumber(val, 1)}</dd>
-                  </React.Fragment>
-                ))}
-              </dl>
-              <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-slate-700">{selectedEvent.dim_dtc?.recommended_action}</p>
-            </div>
-          )}
-        </ChartCard>
-      </div>
+            <p className="mt-2 text-[11px] text-slate-400">Click a bar to see the freeze frame the ECU recorded when the code was set.</p>
+          </>
+        )}
+      </ChartCard>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard
@@ -452,6 +468,7 @@ export default function AssetDiagnosticsView({ vehicleId }) {
         initialSort={{ key: "date", dir: "desc" }}
         csvName={`service-history-${v?.vin ?? vehicleId}.csv`}
       />
+      {selectedEvent && <FreezeFrameModal event={selectedEvent} onClose={() => setSelectedDtc(null)} />}
     </div>
   );
 }

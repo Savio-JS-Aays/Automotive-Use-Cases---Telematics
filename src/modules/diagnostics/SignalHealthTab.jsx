@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Activity, AlertTriangle, BellRing, Clock, SlidersHorizontal } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDownUp, BellRing, Clock, SlidersHorizontal } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -21,7 +21,6 @@ import {
 import KpiCard from "../../components/kpi/KpiCard";
 import { modelColors } from "../telematics/telematicsMetrics";
 import {
-  HEATMAP_ROWS,
   WEAR_SIGNALS,
   anomalyTrend,
   bandDistribution,
@@ -30,6 +29,7 @@ import {
   leadTimes,
   signalHeatmap,
   signalKpis,
+  sortHeatmap,
   signalTrendByModel,
   stateMeta,
   dpfScatter,
@@ -75,7 +75,7 @@ function DpfTooltip({ active, payload }) {
 }
 
 export default function SignalHealthTab({ raw, loading: fleetLoading, signalHealth, onOpenAsset }) {
-  const [showAll, setShowAll] = useState(false);
+  const [sort, setSort] = useState({ key: "risk", dir: "desc" });
   const [wearCode, setWearCode] = useState(WEAR_SIGNALS[0].code);
   const { data: sig, error } = signalHealth;
   const loading = fleetLoading || signalHealth.loading;
@@ -98,8 +98,13 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
     return <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Couldn't load signal data: {error.message}</div>;
   }
 
-  const heatRows = showAll ? heat : heat.slice(0, HEATMAP_ROWS);
+  const heatRows = sortHeatmap(heat, sort.key, sort.dir);
   const flaggedTrucks = heat.filter((t) => t.worst >= 2).length;
+  const sortedSignal = signals.find((s) => s.signal_code === sort.key);
+  const textSort = sort.key === "vin" || sort.key === "model";
+  const dirLabel = textSort ? (sort.dir === "asc" ? "A → Z" : "Z → A") : sort.dir === "desc" ? "Worst first" : "Best first";
+  const sortName = sort.key === "risk" ? "overall risk" : textSort ? (sort.key === "vin" ? "VIN" : "model") : sortedSignal?.signal_name ?? sort.key;
+  const sortLabel = `${sortName}, ${dirLabel.toLowerCase().replace("a → z", "A → Z").replace("z → a", "Z → A")}`;
   const scrSignal = signalByCode.get("SCR_EFFICIENCY");
   const dpfSoot = signalByCode.get("DPF_SOOT_LOAD");
   const dpfDp = signalByCode.get("DPF_DIFF_PRESSURE");
@@ -167,17 +172,24 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
       <ChartCard
         title="Truck × Signal Health Map"
         badge="NOW"
-        tooltip="Latest daily reading of every health signal per truck. Colour follows the band state (critical darkest, then warning, then outside normal); the number is the day's max |z-score|. Trucks are sorted worst first. Click a cell to open the truck with that signal in focus."
+        tooltip="Latest daily reading of every health signal per truck. Colour follows the band state (critical darkest, then warning, then outside normal); the number is the day's max |z-score|. All trucks are listed. Sort by overall risk, VIN or model with the buttons, or click a signal's column header to sort by that signal (worst first; click again to reverse). Click a cell to open the truck with that signal in focus."
         actions={
           <>
             <span className="text-[11px] text-slate-400">Darker = worse band state · number = max |z|</span>
-            {heat.length > HEATMAP_ROWS && (
-              <Segmented
-                value={showAll ? "all" : "top"}
-                onChange={(v) => setShowAll(v === "all")}
-                options={[{ value: "top", label: `Worst ${HEATMAP_ROWS}` }, { value: "all", label: `All ${heat.length}` }]}
-              />
-            )}
+            <Segmented
+              value={["risk", "vin", "model"].includes(sort.key) ? sort.key : null}
+              onChange={(key) => setSort({ key, dir: key === "risk" ? "desc" : "asc" })}
+              options={[{ value: "risk", label: "Risk" }, { value: "vin", label: "VIN" }, { value: "model", label: "Model" }]}
+            />
+            <button
+              type="button"
+              onClick={() => setSort((s) => ({ ...s, dir: s.dir === "asc" ? "desc" : "asc" }))}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              title="Reverse the sort order"
+            >
+              <ArrowDownUp className="h-3.5 w-3.5" />
+              {dirLabel}
+            </button>
           </>
         }
       >
@@ -187,8 +199,12 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
           <EmptyChart message="No health-signal readings in this period." />
         ) : (
           <>
-            <div className="max-h-[32rem] overflow-y-auto pr-1">
+            <div className="pr-1">
               <HeatGrid
+                scrollClass="max-h-[32rem]"
+                sortId={signals.some((s) => s.signal_code === sort.key) ? sort.key : null}
+                sortDir={sort.dir}
+                onColClick={(c) => setSort((s) => (s.key === c.id ? { key: c.id, dir: s.dir === "desc" ? "asc" : "desc" } : { key: c.id, dir: "desc" }))}
                 rows={heatRows.map((t) => ({ id: t.vehicleId, label: t.vin }))}
                 cols={signals.map((s) => ({ id: s.signal_code, label: s.signal_name }))}
                 colLabel={(c) => SHORT_SIGNAL[c.id] ?? c.label}
@@ -213,7 +229,7 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
               />
             </div>
             <p className="mt-2 text-[11px] text-slate-400">
-              {flaggedTrucks} trucks with a warning or critical signal. Showing {heatRows.length} of {heat.length}.
+              {flaggedTrucks} of {heat.length} trucks have a warning or critical signal. Sorted by {sortLabel}.
             </p>
           </>
         )}

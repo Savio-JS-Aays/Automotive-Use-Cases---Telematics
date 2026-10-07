@@ -8,10 +8,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  ComposedChart,
   LabelList,
   Legend,
-  Line,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -22,16 +20,18 @@ import {
 } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import {
+  FAULT_TONES,
   LAMPS,
+  LAMP_MEANING,
   activeDtcRows,
   dtcCodeDetail,
-  dtcPareto,
   dtcRateTrend,
   faultConditions,
   faultKpis,
   lifecycleFunnel,
   systemLabel,
   systemModelMatrix,
+  topFaults,
 } from "./diagnosticsMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatNumber, formatPct, truncateString } from "../telematics/telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, FilterChips, HeatGrid, Segmented, SingleLineTick } from "../telematics/TelematicsUi";
@@ -58,7 +58,7 @@ function ConditionTooltip({ active, payload }) {
 
 export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
   const navigate = useNavigate();
-  const [paretoScope, setParetoScope] = useState("period");
+  const [faultScope, setFaultScope] = useState("period");
   const [includeIntermittent, setIncludeIntermittent] = useState(false);
   const [cross, setCross] = useState(EMPTY_CROSS);
   const [panelCode, setPanelCode] = useState(null);
@@ -66,7 +66,7 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
 
   const kpis = useMemo(() => faultKpis(raw), [raw]);
   const trend = useMemo(() => dtcRateTrend(raw), [raw]);
-  const pareto = useMemo(() => dtcPareto(raw, { scope: paretoScope, includeIntermittent }), [raw, paretoScope, includeIntermittent]);
+  const faults = useMemo(() => topFaults(raw, { scope: faultScope, includeIntermittent }), [raw, faultScope, includeIntermittent]);
   const matrix = useMemo(() => systemModelMatrix(raw), [raw]);
   const funnel = useMemo(() => lifecycleFunnel(raw), [raw]);
   const conditions = useMemo(() => faultConditions(raw), [raw]);
@@ -186,12 +186,12 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <ChartCard
           className="xl:col-span-2"
-          title="Top Fault Codes (Pareto)"
-          badge={paretoScope === "active" ? "NOW" : "PERIOD"}
-          tooltip="Fault codes ranked by occurrences, with the cumulative share line. The few codes on the left drive most of the workshop load. Click a bar for the code's definition, affected trucks and likely parts."
+          title="Most Common Faults"
+          badge={faultScope === "active" ? "NOW" : "PERIOD"}
+          tooltip="Which faults hit the most trucks. Colour shows how serious: red = stop or power limited, amber = service soon, grey = self-healing glitches. Click a bar to see what the fault means, which trucks have it and which parts usually cause it."
           actions={
             <>
-              <Segmented value={paretoScope} onChange={setParetoScope} options={[{ value: "period", label: "Period" }, { value: "active", label: "Active now" }]} />
+              <Segmented value={faultScope} onChange={setFaultScope} options={[{ value: "period", label: "Period" }, { value: "active", label: "Active now" }]} />
               <Segmented
                 value={includeIntermittent ? "all" : "repair"}
                 onChange={(v) => setIncludeIntermittent(v === "all")}
@@ -202,32 +202,58 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
         >
           {loading ? (
             <ChartSkeleton height="h-80" />
-          ) : pareto.rows.length === 0 ? (
-            <EmptyChart height="h-80" message="No fault codes in this scope." />
+          ) : faults.rows.length === 0 ? (
+            <EmptyChart height="h-80" message="No faults in this scope." />
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(220, pareto.rows.length * 26 + 50)}>
-              <ComposedChart layout="vertical" data={pareto.rows} margin={{ left: 8, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis xAxisId="n" type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <XAxis xAxisId="pct" type="number" orientation="top" domain={[0, 100]} unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="label" width={230} interval={0} tick={<SingleLineTick max={36} />} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip
-                  formatter={(v, name, item) => (name === "Cumulative" ? [`${Number(v).toFixed(0)}%`, name] : [`${v} (${item.payload.trucks} trucks)`, name])}
-                  labelFormatter={(l, p) => `${p?.[0]?.payload?.dtcId ?? ""} · ${l}`}
-                />
-                <Bar xAxisId="n" dataKey="count" name="Occurrences" radius={[0, 3, 3, 0]} onClick={(d) => setPanelCode(d.dtcId ?? d.payload?.dtcId)} className="cursor-pointer">
-                  {pareto.rows.map((r) => (
-                    <Cell key={r.dtcId} fill={r.intermittent === r.count ? "#cbd5e1" : "#0ea5e9"} />
-                  ))}
-                </Bar>
-                <Line xAxisId="pct" dataKey="cumPct" name="Cumulative" stroke="#0f172a" strokeWidth={2} dot={{ r: 2 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-          {!loading && pareto.codes > pareto.rows.length && (
-            <p className="mt-1 text-[11px] text-slate-400">
-              Top {pareto.rows.length} of {pareto.codes} codes · {pareto.total} occurrences. Grey bars = intermittent-only codes.
-            </p>
+            <>
+              <p className="mb-2 text-xs text-slate-600">
+                <span className="font-semibold text-slate-800">{faults.rows[0].name}</span> is the most widespread fault:{" "}
+                {faults.rows[0].trucks} of {faults.fleetTrucks} trucks with a fault.
+              </p>
+              <ResponsiveContainer width="100%" height={Math.max(220, faults.rows.length * 32 + 30)}>
+                <BarChart layout="vertical" data={faults.rows} margin={{ left: 8, right: 36 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
+                  <YAxis type="category" dataKey="name" width={210} interval={0} tick={<SingleLineTick max={32} />} axisLine={AXIS_LINE} tickLine={false} />
+                  <RechartsTooltip
+                    cursor={{ fill: "#f8fafc" }}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const f = payload[0].payload;
+                      return (
+                        <div className="rounded-lg bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-slate-200">
+                          <p className="font-semibold text-slate-700">{f.name}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {f.dtcId} · {systemLabel(f.system)}
+                          </p>
+                          <p className="mt-1 text-slate-600">
+                            {f.trucks} {f.trucks === 1 ? "truck" : "trucks"} · raised {f.count} {f.count === 1 ? "time" : "times"} · {f.active} active now
+                          </p>
+                          <p className="text-slate-500">{f.glitch ? "Self-healing glitch: clears without a repair" : LAMP_MEANING[f.lamp] ?? f.lamp}</p>
+                        </div>
+                      );
+                    }}
+                  />
+                  <Bar dataKey="trucks" name="Trucks" radius={[0, 3, 3, 0]} onClick={(d) => setPanelCode(d.dtcId ?? d.payload?.dtcId)} className="cursor-pointer">
+                    {faults.rows.map((r) => (
+                      <Cell key={r.dtcId} fill={FAULT_TONES[r.tone].color} />
+                    ))}
+                    <LabelList dataKey="trucks" position="right" style={{ fontSize: 11, fill: "#64748b" }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                {Object.values(FAULT_TONES).map((tone) => (
+                  <span key={tone.label} className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: tone.color }} />
+                    {tone.label}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Showing the top {faults.rows.length} of {faults.codes} faults · {faults.fleetTrucks} trucks had at least one.
+              </p>
+            </>
           )}
         </ChartCard>
 

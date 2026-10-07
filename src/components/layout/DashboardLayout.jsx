@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useFilterStore } from "../../store/useFilterStore";
 import { supabase } from "../../lib/supabaseClient";
+import TruckSwitcher from "./TruckSwitcher";
 // ---------------------------------------------------------------------------
 // Nav configuration — one entry per module.
 // ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ function useFilterOptions() {
     let isMounted = true;
     supabase
       .from("v_vehicle_context")
-      .select("region_id, region_name, model_id, model_label, powertrain, application_id, application_name, customer_type")
+      .select("vehicle_id, vin, region_id, region_name, model_id, model_label, powertrain, application_id, application_name, customer_type")
       .eq("is_connected", true)
       .then(({ data, error }) => {
         if (isMounted && !error) setRows(data ?? []);
@@ -73,6 +74,7 @@ function useFilterOptions() {
       ),
       applications: distinctOptions(rows, "application_id", (r) => r.application_name, "All Applications"),
       customerTypes: distinctOptions(rows, "customer_type", (r) => r.customer_type, "All Customer Types"),
+      trucks: [...rows].sort((a, b) => String(a.vin ?? a.vehicle_id).localeCompare(String(b.vin ?? b.vehicle_id))),
     }),
     [rows]
   );
@@ -84,12 +86,12 @@ function useFilterOptions() {
 function FilterSelect({ label, value, onChange, options }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-medium text-slate-700">{label}</label>
+      <label className="text-[13px] font-semibold text-slate-700">{label}</label>
       <div className="relative flex items-center">
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-md text-sm px-3 py-2 pr-8 text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500 transition-colors"
+          className="w-full appearance-none bg-white border border-slate-200 rounded-lg text-base px-3.5 py-2.5 pr-9 text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500 transition-colors"
         >
           {options.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -98,7 +100,7 @@ function FilterSelect({ label, value, onChange, options }) {
           ))}
         </select>
         <ChevronDown
-          className="pointer-events-none absolute right-2.5 h-4 w-4 text-slate-400"
+          className="pointer-events-none absolute right-3 h-4 w-4 text-slate-500"
           strokeWidth={2}
         />
       </div>
@@ -111,7 +113,7 @@ function FilterSelect({ label, value, onChange, options }) {
 // ---------------------------------------------------------------------------
 function TopNavigation() {
   return (
-    <header className="h-16 shrink-0 bg-slate-900 text-slate-300 flex items-center justify-between px-6 z-20">
+    <header className="h-16 shrink-0 bg-[#0b1220] text-slate-300 flex items-center justify-between px-6 z-20">
       <div className="flex items-center gap-8">
         {/* Logo area */}
         <div className="flex items-center gap-2.5">
@@ -119,7 +121,7 @@ function TopNavigation() {
             <Activity className="h-5 w-5" strokeWidth={2} />
           </div>
           <div className="leading-tight">
-            <p className="text-sm font-semibold text-white">Telematics</p>
+            <p className="text-base font-semibold text-white">Fleet Pulse</p>
           </div>
         </div>
 
@@ -132,10 +134,10 @@ function TopNavigation() {
               end={path === "/"}
               className={({ isActive }) =>
                 [
-                  "flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                  "flex items-center gap-2 px-4 py-2 text-[15px] font-medium rounded-lg transition-colors",
                   isActive
-                    ? "bg-slate-800 text-white"
-                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100",
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-300 hover:bg-white/10 hover:text-white",
                 ].join(" ")
               }
             >
@@ -146,7 +148,7 @@ function TopNavigation() {
         </nav>
       </div>
 
-      <div className="text-xs text-slate-500 font-medium">
+      <div className="text-sm text-slate-400 font-medium">
         Fleet Ops Console
       </div>
     </header>
@@ -173,16 +175,17 @@ function FilterSidebar() {
   const setCustomerType = useFilterStore((s) => s.setCustomerType);
   const clearSelectedVin = useFilterStore((s) => s.clearSelectedVin);
 
-  const { regions, models, powertrains, applications, customerTypes } = useFilterOptions();
+  const { regions, models, powertrains, applications, customerTypes, trucks } = useFilterOptions();
+  const setSelectedVin = useFilterStore((s) => s.setSelectedVin);
 
   const isAssetView = selectedVin !== null;
 
   return (
-    <aside className="w-64 shrink-0 bg-white border-r border-slate-200 flex flex-col z-10">
+    <aside className="w-72 shrink-0 bg-slate-50 border-r border-slate-200 flex flex-col z-10">
       {/* Context Header */}
-      <div className="p-5 border-b border-slate-100">
-        <h2 className="text-sm font-semibold text-slate-800">
-          {isAssetView ? "Asset View" : "Fleet Overview"}
+      <div className="px-5 pt-5 pb-4 border-b border-slate-200">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-800">
+          {isAssetView ? "Asset View" : "Filters"}
         </h2>
         <p className="text-xs text-slate-400 mt-1 leading-relaxed">
           {isAssetView
@@ -192,7 +195,7 @@ function FilterSidebar() {
       </div>
 
       {/* Filter Controls */}
-      <div className="p-5 space-y-6 flex-1 overflow-y-auto">
+      <div className="p-5 space-y-5 flex-1 overflow-y-auto">
         <FilterSelect
           label="Date Range"
           value={dateRange}
@@ -206,9 +209,7 @@ function FilterSidebar() {
             <span className="text-xs font-semibold text-sky-800 uppercase tracking-wider mb-1">
               Active Vehicle
             </span>
-            <span className="text-base font-bold text-sky-900 mb-4">
-              {selectedVin}
-            </span>
+            <TruckSwitcher trucks={trucks} selectedId={selectedVin} onSelect={setSelectedVin} />
             <button
               type="button"
               onClick={clearSelectedVin}
@@ -268,7 +269,7 @@ export default function DashboardLayout({ children }) {
       <div className="flex flex-1 overflow-hidden">
         <FilterSidebar />
 
-        <main className="flex-1 overflow-y-auto p-6 relative">
+        <main className="flex-1 overflow-y-auto p-8 relative">
           {/* Use <Outlet /> when this layout wraps react-router routes. */}
           {children ?? <Outlet />}
         </main>

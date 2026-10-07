@@ -34,7 +34,8 @@ export const HAZARD_STYLES = {
 export const HAZARD_COLORS = { Critical: "#e11d48", Watch: "#f59e0b", "On Spec": "#10b981", "Insufficient Data": "#94a3b8" };
 export const RISK_TIER_COLORS = { High: "#e11d48", Medium: "#f59e0b", Low: "#10b981" };
 export const GROUP_PALETTE = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#10b981", "#e11d48", "#64748b"];
-export const MODE_PALETTE = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#10b981", "#e11d48", "#14b8a6", "#64748b", "#ec4899", "#84cc16", "#f97316", "#6366f1", "#a3a3a3"];
+export const CLEAR_CAUSE_SHARE = 40; // one failure mode at or above this % of a part's failures is a clear corrective-action target
+export const MAIN_CAUSE_PARTS = 10;
 
 export const GROUP_TYPES = [
   { value: "all", label: "All" },
@@ -647,21 +648,37 @@ export function whereFails(lt, summaries, dim, topParts = 12) {
 // ---------------------------------------------------------------------------
 // Root cause
 // ---------------------------------------------------------------------------
-export function failureModeMix(lt, summaries, topParts = 10) {
+/**
+ * Main failure cause per part, for the most-replaced parts. Each row: failures, the most common
+ * `failure_mode` and its share, the next one, and every mode (for the tooltip). `clear` = the main
+ * mode is at least CLEAR_CAUSE_SHARE % of the failures, on a sample of MIN_GROUP_FAILURES or more.
+ */
+export function mainCauses(lt, summaries, topParts = MAIN_CAUSE_PARTS) {
   const parts = summaries.slice(0, topParts);
-  const modes = new Set();
   const rows = parts.map((p) => {
-    const row = { partId: p.partId, label: p.partName, total: 0 };
+    const counts = new Map();
+    let total = 0;
     for (const f of lt.failures) {
       if (f.partId !== p.partId) continue;
       const m = f.mode ?? "Unknown";
-      modes.add(m);
-      row[m] = (row[m] ?? 0) + 1;
-      row.total += 1;
+      counts.set(m, (counts.get(m) ?? 0) + 1);
+      total += 1;
     }
-    return row;
+    const modes = [...counts.entries()]
+      .map(([mode, count]) => ({ mode, count, share: total > 0 ? (count / total) * 100 : 0 }))
+      .sort((a, b) => b.count - a.count || a.mode.localeCompare(b.mode));
+    const main = modes[0] ?? null;
+    return {
+      partId: p.partId,
+      partName: p.partName,
+      failures: total,
+      main,
+      second: modes[1] ?? null,
+      modes,
+      clear: Boolean(main) && Math.round(main.share) >= CLEAR_CAUSE_SHARE && total >= MIN_GROUP_FAILURES, // judged on the rounded share that is displayed
+    };
   });
-  return { rows, modes: [...modes].sort() };
+  return { rows, max: Math.max(1, ...rows.map((r) => r.failures)), clearCount: rows.filter((r) => r.clear).length };
 }
 
 /**

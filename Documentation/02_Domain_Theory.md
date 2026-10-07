@@ -302,10 +302,10 @@ when a unit is offline.
   - it received zero packets on its latest day; or
   - its last report is more than 48 h older than the fleet's latest.
 
-**Coaching focus** (driver panel): a driver's indicators are compared with the fleet median.
-- Brake applications per 100 km, idle % and overspeed seconds are flagged when well above the
-  median.
-- RPM green-band % and cruise % are flagged when more than 10 points below it.
+**Group comparison** (Driver Safety tab): safety is compared across fleet groups (model,
+application, region), not across named drivers. A group's score is distance-weighted, and its
+event rate is `events ÷ km × 1,000`. The share of its drivers below the "Coach now" line (70) is
+reported as a percentage only.
 
 Details: [metrics/telematics.md](metrics/telematics.md).
 

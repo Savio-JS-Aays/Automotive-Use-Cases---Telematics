@@ -20,7 +20,6 @@ export const MIN_PREV_COVERAGE = 0.8; // share of expected vehicle-days needed t
 // last report is older than this (same 48 h stale rule as the Overview).
 export const SILENT_HOURS = 48;
 export const LOW_COMPLETENESS_PCT = 90;
-export const IDLE_RANKING_MIN_ENGINE_H = 10;
 export const OVERSPEED_LIMIT_KMH = 80;
 
 export const EVENT_LABELS = {
@@ -594,19 +593,45 @@ export function consumptionTrend(raw, mode) {
   return { data, series };
 }
 
-export function worstIdleTrucks(trucks, limit = 10) {
-  return trucks
-    .filter((t) => t.engineH >= IDLE_RANKING_MIN_ENGINE_H && t.idlePct !== null)
-    .sort((a, b) => b.idlePct - a.idlePct)
-    .slice(0, limit)
-    .map((t) => ({
-      vehicleId: t.vehicleId,
-      label: t.vin ?? t.vehicleId,
-      modelLabel: t.modelLabel,
-      idlePct: Number(t.idlePct.toFixed(1)),
-      idleH: Number(t.idleH.toFixed(1)),
-      idleCostInr: t.idleCostInr,
-    }));
+/**
+ * Idle share aggregated by model or region (ratio of sums, not an average of truck percentages,
+ * so big trucks do not get the same weight as small ones). Idle cost is diesel only: BEVs
+ * have no fuel to burn, so their cost is null.
+ */
+export function idleByGroup(trucks, by) {
+  const groups = new Map();
+  let idleH = 0;
+  let engineH = 0;
+  for (const t of trucks) {
+    if (t.days === 0) continue;
+    const [id, label] = by === "region" ? [t.regionId, t.regionName] : [t.modelId, t.modelLabel];
+    const g = groups.get(id) ?? { id, label, trucks: 0, engineH: 0, idleH: 0, idleCostInr: 0, dieselTruckDays: 0, bev: 0 };
+    g.trucks += 1;
+    g.engineH += t.engineH;
+    g.idleH += t.idleH;
+    if (t.powertrain === "bev") g.bev += 1;
+    else {
+      g.idleCostInr += t.idleCostInr;
+      g.dieselTruckDays += t.days;
+    }
+    groups.set(id, g);
+    idleH += t.idleH;
+    engineH += t.engineH;
+  }
+  const rows = [...groups.values()]
+    .map((g) => ({
+      id: g.id,
+      label: g.label,
+      trucks: g.trucks,
+      idlePct: g.engineH > 0 ? Number(((g.idleH / g.engineH) * 100).toFixed(1)) : null,
+      idleH: Number(g.idleH.toFixed(0)),
+      idleCostInr: g.dieselTruckDays > 0 ? g.idleCostInr : null,
+      costPerTruckMonthInr: g.dieselTruckDays > 0 ? (g.idleCostInr / g.dieselTruckDays) * 30 : null,
+      allBev: g.bev === g.trucks,
+    }))
+    .filter((g) => g.idlePct !== null)
+    .sort((a, b) => b.idlePct - a.idlePct);
+  return { rows, fleetPct: ratio(idleH, engineH, 100) };
 }
 
 const MAX_SCATTER_POINTS_PER_MODEL = 400;
@@ -989,64 +1014,125 @@ export function driverStats(raw, filter) {
     .filter((d) => d.km > 0);
 }
 
-/** Plain-language coaching focus, from the driver's worst indicators vs fleet medians. */
-export function coachingFocus(driver, drivers) {
-  const median = (field) => {
-    const vals = drivers.map((d) => d[field]).filter((v) => v !== null && v !== undefined).sort((a, b) => a - b);
-    return vals.length ? vals[Math.floor(vals.length / 2)] : null;
+/**
+ * Safety rolled up to a fleet dimension (model, application or region) so an OEM compares
+ * groups of trucks rather than naming drivers. Groups come from the vehicle. `coachNowPct`
+ * is the share of the group's drivers (with at least `minKm` driven in the group) whose
+ * score is in the "Coach now" band: a percentage only, nobody is named.
+ */
+export function safetyByGroup(raw, filter, by, minKm) {
+  if (!raw.period) return { rows: [], families: [], fleet: null };
+  const vIdx = vehicleIndex(raw);
+  const keyOf = (v) => {
+    if (by === "application") return [v.application_name ?? "Unknown", v.application_name ?? "Unknown"];
+    if (by === "region") return [v.region_id, v.region_name];
+    return [v.model_id, v.model_label];
   };
-  const tips = [];
-  if (driver.topEventType) {
-    const share = driver.events > 0 ? (driver.byType[0].count / driver.events) * 100 : 0;
-    tips.push(`${EVENT_LABELS[driver.topEventType] ?? driver.topEventType} is ${share.toFixed(0)}% of this driver's events.`);
-  }
-  const brakesMed = median("brakesPer100");
-  if (driver.brakesPer100 !== null && brakesMed && driver.brakesPer100 > brakesMed * 1.3) {
-    tips.push(`Anticipation: ${driver.brakesPer100.toFixed(0)} brake applications / 100 km vs fleet median ${brakesMed.toFixed(0)}.`);
-  }
-  const greenMed = median("greenBandPct");
-  if (!driver.bev && driver.greenBandPct !== null && greenMed && driver.greenBandPct < greenMed - 10) {
-    tips.push(`Gear use: ${driver.greenBandPct.toFixed(0)}% of drive time in the RPM green band vs median ${greenMed.toFixed(0)}%.`);
-  }
-  const idleMed = median("idlePct");
-  if (driver.idlePct !== null && idleMed && driver.idlePct > idleMed * 1.3) {
-    tips.push(`Idling: ${driver.idlePct.toFixed(0)}% of engine-on time vs median ${idleMed.toFixed(0)}%.`);
-  }
-  const cruiseMed = median("cruisePct");
-  if (driver.cruisePct !== null && cruiseMed && driver.cruisePct < cruiseMed - 10) {
-    tips.push(`Cruise control used on ${driver.cruisePct.toFixed(0)}% of distance vs median ${cruiseMed.toFixed(0)}%.`);
-  }
-  const overMed = median("overspeedPer100");
-  if (driver.overspeedPer100 !== null && driver.overspeedPer100 > Math.max(overMed ?? 0, 1) * 1.5) {
-    tips.push(`Overspeed: ${driver.overspeedPer100.toFixed(0)} s above ${OVERSPEED_LIMIT_KMH} km/h per 100 km.`);
-  }
-  if (tips.length === 0) tips.push("No indicator is clearly worse than the fleet median.");
-  return tips;
-}
+  const groups = new Map();
+  const ensure = (v) => {
+    const [id, label] = keyOf(v);
+    if (!groups.has(id)) {
+      groups.set(id, {
+        id,
+        label,
+        cur: [],
+        prev: [],
+        vehicles: new Set(),
+        events: 0,
+        high: 0,
+        byType: new Map(),
+        byFamily: new Map(),
+        ecoW: 0,
+        ecoKm: 0,
+        drivers: new Map(),
+      });
+    }
+    return groups.get(id);
+  };
 
-/** Weekly km-weighted safety score for one driver. */
-export function driverWeeklySafety(driver) {
-  const weeks = new Map();
-  for (const r of driver.dailyRows) {
-    const key = weekStart(r.date_id);
-    const w = weeks.get(key) ?? { week: key, rows: [] };
-    w.rows.push(r);
-    weeks.set(key, w);
+  for (const r of raw.daily) {
+    const v = vIdx.get(r.vehicle_id);
+    if (!v) continue;
+    const cur = inCurrent(raw.period, r.date_id);
+    if (!cur && !inPrevious(raw.period, r.date_id)) continue;
+    const g = ensure(v);
+    if (cur) {
+      g.cur.push(r);
+      if (num(r.distance_km) > 0) {
+        g.vehicles.add(r.vehicle_id);
+        if (r.driver_id) {
+          const rows = g.drivers.get(r.driver_id) ?? [];
+          rows.push(r);
+          g.drivers.set(r.driver_id, rows);
+        }
+      }
+    } else g.prev.push(r);
   }
-  return [...weeks.values()]
-    .sort((a, b) => (a.week < b.week ? -1 : 1))
-    .map((w) => {
-      const s = distanceWeighted(w.rows, "safety_score");
-      return { week: w.week, safety: s === null ? null : Number(s.toFixed(1)) };
-    });
-}
+  for (const e of raw.events) {
+    const v = vIdx.get(e.vehicle_id);
+    if (!v || !inCurrent(raw.period, e.date_id) || !eventMatches(e, filter)) continue;
+    const g = ensure(v);
+    g.events += 1;
+    if (e.severity === "high") g.high += 1;
+    addTo(g.byType, e.event_type, 1);
+    addTo(g.byFamily, FAMILY_OF[e.event_type], 1);
+  }
+  for (const t of raw.trips) {
+    const v = vIdx.get(t.vehicle_id);
+    if (!v || t.eco_score === null || !inCurrent(raw.period, t.date_id)) continue;
+    const g = ensure(v);
+    const km = num(t.distance_km);
+    g.ecoW += Number(t.eco_score) * km;
+    g.ecoKm += km;
+  }
 
-export function worstDrivers(drivers, minKm, limit = 10) {
-  return drivers
-    .filter((d) => d.km >= minKm && d.safety !== null)
-    .sort((a, b) => a.safety - b.safety)
-    .slice(0, limit)
-    .map((d) => ({ ...d, safetyRounded: Number(d.safety.toFixed(1)), color: bandOf(SAFETY_BANDS, d.safety).color }));
+  const families = EVENT_FAMILIES.filter((f) => !filter.families || filter.families.includes(f.name));
+  const rows = [...groups.values()]
+    .map((g) => {
+      const km = g.cur.reduce((s, r) => s + num(r.distance_km), 0);
+      const safety = distanceWeighted(g.cur, "safety_score");
+      const safetyPrev = distanceWeighted(g.prev, "safety_score");
+      let rated = 0;
+      let coach = 0;
+      for (const driverRows of g.drivers.values()) {
+        const dKm = driverRows.reduce((s, r) => s + num(r.distance_km), 0);
+        const dSafety = distanceWeighted(driverRows, "safety_score");
+        if (dKm < minKm || dSafety === null) continue;
+        rated += 1;
+        if (bandOf(SAFETY_BANDS, dSafety)?.name === "Coach now") coach += 1;
+      }
+      const topType = [...g.byType.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      const row = {
+        id: g.id,
+        label: g.label,
+        trucks: g.vehicles.size,
+        drivers: g.drivers.size,
+        km,
+        safety,
+        safetyDelta: safety !== null && safetyPrev !== null && g.prev.length >= 3 ? safety - safetyPrev : null,
+        band: bandOf(SAFETY_BANDS, safety)?.name ?? null,
+        eco: g.ecoKm > 0 ? g.ecoW / g.ecoKm : null,
+        events: g.events,
+        eventsPer1000: ratio(g.events, km, 1000),
+        highSeverityPct: ratio(g.high, g.events, 100),
+        topEventType: topType,
+        coachNowPct: ratio(coach, rated, 100),
+        ratedDrivers: rated,
+        lowSample: g.vehicles.size < MATRIX_MIN_TRUCKS,
+      };
+      for (const f of families) row[f.name] = km > 0 ? Number((((g.byFamily.get(f.name) ?? 0) / km) * 1000).toFixed(2)) : 0;
+      return row;
+    })
+    .filter((g) => g.km > 0)
+    .sort((a, b) => (b.eventsPer1000 ?? 0) - (a.eventsPer1000 ?? 0));
+
+  const fleetKm = rows.reduce((s, g) => s + g.km, 0);
+  const fleetEvents = rows.reduce((s, g) => s + g.events, 0);
+  return {
+    rows,
+    families,
+    fleet: { eventsPer1000: ratio(fleetEvents, fleetKm, 1000), safety: distanceWeighted(splitDaily(raw).cur, "safety_score") },
+  };
 }
 
 export function safetyDistribution(drivers, minKm) {

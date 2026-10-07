@@ -14,7 +14,7 @@ derate.
 - **Active DTC at time t:** `first_seen_ts ≤ t AND (cleared_ts IS NULL OR cleared_ts > t)
   AND status ≠ 'previously_active'`.
 - **Intermittent (nuisance) DTC:** `status = 'previously_active'`. These self-heal and are
-  excluded from repair KPIs, but kept in the Pareto.
+  excluded from repair KPIs, but available in Most Common Faults ("+ Intermittent").
 - **Exposure:** km from `fact_vehicle_daily.distance_km`; engine hours from
   `fact_vehicle_daily.engine_hours`.
 
@@ -31,7 +31,7 @@ derate.
 ## Charts (plan → status)
 | Title | View | Visual | Formula | Status |
 |---|---|---|---|---|
-| Top fault codes (Pareto) | Fleet | horizontal bar + cumulative % line | `count(*) group by dtc_id`, sorted descending; cumulative % = running sum / total. Label: SPN description + FMI | Implemented |
+| Top fault codes (Pareto) | Fleet | horizontal bar + cumulative % line | `count(*) group by dtc_id`, sorted descending; cumulative % = running sum / total. Label: SPN description + FMI | Replaced (2026-10-01) by **Most Common Faults**: bars of distinct trucks per fault, plain-English names, coloured by lamp, no cumulative line. See [diagnostics.md](diagnostics.md) |
 | Faults by system × model | Fleet | heatmap | `count(*) group by dim_dtc.system, v_vehicle_context.model_label` | Implemented (per 100 trucks) |
 | DTC rate trend | Fleet | line, 7-day rolling | daily `count(first seen) / daily km × 10,000` | Implemented (stacked by lamp) |
 | Lamp severity mix | Fleet | donut (4 slices) | `count(*) group by lamp_status` (MIL / AWL / RSL / PL) | Replaced by the lamp-stacked trend |

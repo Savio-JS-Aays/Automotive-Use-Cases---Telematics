@@ -3,7 +3,102 @@
 > Dated record of feature, data-model and documentation changes. Add an entry for every
 > change, newest first.
 >
-> Last updated: 2026-10-01
+> Last updated: 2026-10-07
+
+## 2026-10-07 — UI restyle (KPI cards, filters, header, layout)
+- Visual only; no formulas, data or chart/bar/alert colours changed.
+- `KpiCard`: accent top border (derived from `iconColorClass`), bold slate title, 32 px value,
+  "?" tooltip at top-right; the icon bubble is no longer drawn.
+- Sidebar: "Filters" heading, wider (w-72), larger select text (`text-base`) with white fields and
+  bold labels. Header: darker navy bar, white active pill, brand "Fleet Pulse".
+- Cards use `rounded-2xl` / more padding, chart titles are bolder, module page titles are
+  `text-2xl`, main padding is larger.
+
+## 2026-10-01 — Failure-Mode Mix redesigned as Main Failure Cause by Part
+- **Component Reliability → Root Cause:** "Failure-Mode Mix (Top 10 Parts)" (stacked bars with up to
+  ~20 failure modes and a 12-colour legend) is replaced by **Main Failure Cause by Part**.
+  - A ranked list of the 10 most-replaced parts. Each row has one single-colour bar for the
+    failure count and a plain sentence: "Mostly {failure mode} ({share} %)".
+  - Parts where one mode causes 40 % or more of the failures (and there are at least 5 failures)
+    get a **Clear target** tag. Otherwise the second most common mode is shown.
+  - Hovering a row lists every mode with its count and share. Clicking a row opens the Part View.
+  - No legend and no colours to decode.
+- Code: `mainCauses()` replaces `failureModeMix()` in `reliabilityMetrics.js`; `MODE_PALETTE` is
+  removed; new constants `CLEAR_CAUSE_SHARE` and `MAIN_CAUSE_PARTS`.
+- Docs: `metrics/reliability.md`.
+
+## 2026-10-01 — Signal map shows all trucks with sorting; freeze frame as a popup
+- **Vehicle Diagnostics → Signal Health → Truck × Signal Health Map:**
+  - the worst-40 limit and its toggle are removed: **all trucks load**, in a scrolling grid with a
+    sticky header row;
+  - **sort by risk** (default), VIN or model, with a reverse button;
+  - **every signal column header sorts** the trucks by that signal (worst first; click again to
+    reverse; trucks without the signal go last), with an arrow on the active column.
+  - `HEATMAP_ROWS` is removed; `sortHeatmap()` is new. `HeatGrid` (shared) gained optional
+    `scrollClass`, `onColClick`, `sortId` and `sortDir`, and the other heatmaps are unchanged.
+- **Vehicle Diagnostics → Asset View:** the standing **Freeze Frame** card is removed. The Fault
+  Code Timeline is full width, and **clicking a bar opens a freeze-frame popup** (Esc, the close
+  button or a click outside closes it).
+- Docs: `metrics/diagnostics.md`, `docs/CLAUDE.md`.
+
+## 2026-10-01 — Truck switcher in Asset View
+- **Sidebar → Active Vehicle card:** the plain vehicle ID is replaced by a searchable **truck
+  switcher** (`TruckSwitcher.jsx`). In any Asset View (Diagnostics, Telematics) you can jump to
+  another truck without going back to the fleet tables.
+  - Search matches VIN, vehicle ID, model, region and application; every word must match.
+  - Keyboard: Up / Down to move, Enter to choose, Esc to close. The current truck is ticked.
+  - Lists the connected trucks, sorted by VIN. It reuses the sidebar's existing `v_vehicle_context`
+    query (now also selects `vehicle_id` and `vin`), so there is no extra request.
+  - Choosing a truck sets `selectedVin`. The Asset Views re-mount on the change, so local state
+    (selected trip, day, DTC) resets. The date range is kept.
+- Docs: `03_Technical_Architecture.md`, `docs/CLAUDE.md`.
+
+## 2026-10-01 — Top Fault Codes (Pareto) redesigned as Most Common Faults
+- **Vehicle Diagnostics → Fault Codes:** the Pareto (occurrence bars, second axis, cumulative-%
+  line, SPN / FMI labels) is replaced by **Most Common Faults**, which is easier to read.
+  - **Bar = distinct trucks** with the fault. Times raised and active now are in the tooltip.
+  - **Plain-English names** for all 27 codes (`FAULT_NAMES`), for example "Front brake lining
+    worn". The SPN / FMI is kept in the tooltip and the drawer subtitle.
+  - **Coloured by lamp:** red = stop or power limited, amber = service soon, grey = self-healing
+    glitch. A legend sits under the chart.
+  - A takeaway line above the bars: "{fault} is the most widespread fault: N of M trucks".
+  - The top is 10 (was 15). No cumulative line.
+  - The code drawer now shows the plain name as its heading.
+- Code: `topFaults()` replaces `dtcPareto()` in `diagnosticsMetrics.js`; `TOP_FAULTS` replaces
+  `PARETO_TOP`. No database change.
+- Checked against SQL (last 30 days, Period / Active now × Repairable / + Intermittent): trucks,
+  occurrences, active counts, ranking, number of codes and trucks with a fault all match. Every
+  `dim_dtc` code has a name.
+- Docs: `metrics/diagnostics.md`, `metrics/dtc-analysis.md`, `08_Glossary.md`,
+  `01_Project_Overview.md`, `docs/CLAUDE.md`.
+
+## 2026-10-01 — Safety views by group instead of by driver; scatter without lines
+- **Telematics → Fuel, Energy & CO₂:** the Consumption vs Load scatter no longer draws a fitted
+  line through each model's dots.
+- **Telematics → Driver Safety:** per-driver views are replaced by fleet groups, because an OEM
+  compares truck models, duty cycles and regions, not named drivers.
+  - **Group by** toggle: Model / Application / Region.
+  - "Worst 10 Drivers by Safety Score" → **Safety Risk by Model / Application / Region**: events
+    per 1,000 km stacked by event family, with the fleet rate as a reference line.
+  - "Driver Scorecard" → **Safety Scorecard by Model / Application / Region**: safety, Δ, eco,
+    distance, trucks, drivers, events per 1,000 km, high-severity %, top event and Coach-now %.
+  - **Removed:** the driver panel (`DriverPanel.jsx`), `worstDrivers`, `coachingFocus` and
+    `driverWeeklySafety`. The score distribution no longer filters a table, and the hidden Coaching
+    Quadrant has no click-through.
+  - New `safetyByGroup()` in `telematicsMetrics.js`. Checked against SQL on the seeded data (30
+    days): events per 1,000 km and safety match for all three groupings.
+- Docs: `metrics/telematics.md`, `02_Domain_Theory.md`, `03_Technical_Architecture.md`,
+  `docs/CLAUDE.md`.
+
+## 2026-10-01 — Idle chart aggregated by model and region
+- **Telematics → Fuel, Energy & CO₂:** "Worst 10 Trucks by Idle Share" is replaced by
+  **Idle Share by Model and Region**, because a list of individual trucks is not actionable.
+  - Groups are ratio-of-sums idle share with a By Model / By Region toggle and a fleet-average
+    reference line. The tooltip adds idle hours, trucks and diesel idle cost, plus cost per
+    truck-month.
+  - Code: `idleByGroup()` replaces `worstIdleTrucks()` in `telematicsMetrics.js`;
+    `IDLE_RANKING_MIN_ENGINE_H` is removed.
+  - Docs: `metrics/telematics.md`.
 
 ## 2026-10-01 — Charts hidden from the dashboard (on request)
 - Each chart is hidden behind a `SHOW` flag at the top of its tab file. Code, formulas and docs are

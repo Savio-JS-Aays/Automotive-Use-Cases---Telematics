@@ -32,6 +32,7 @@
 | **Field B10** | B10 measured from field replacements with Kaplan–Meier (running parts censored); compared with the design B10 as "variance %" |
 | **Fleet View** | whole-fleet aggregate view (`selectedVin = null`) |
 | **Fleetboard** | Mercedes-Benz Trucks telematics / fleet-management service |
+| **Fault name (plain-language)** | the short English name shown for a fault code in the UI (`FAULT_NAMES`, for example "Front brake lining worn" for `SPN1099-FMI18`); the SPN / FMI stays visible as a subtitle |
 | **FMI** | Failure Mode Identifier: *how* a parameter is faulty (0–31) |
 | **Freeze frame** | snapshot of key parameters when a DTC was set (`fact_dtc_event.freeze_frame`) |
 | **GCW** | Gross Combination Weight: truck + trailer + load (kg) |
@@ -52,6 +53,7 @@
 | **OC** | Occurrence Count of a DTC |
 | **ODC** | Over-Dimensional Cargo (heavy haul) |
 | **Part life** | km since the part was fitted (renewal model): odometer at failure − odometer at the previous replacement of that part |
+| **Pareto chart** | ranking of causes by how often they occur, usually with a cumulative-% line; the Fault Codes tab used one before 2026-10-01 and now shows the simpler Most Common Faults bars |
 | **PGN** | Parameter Group Number: the J1939 message that carries a set of SPNs |
 | **PL** | Protect Lamp: derate / inducement active |
 | **Precursor ramp** | mean \|z\| of a signal in the 7 days before a failure ÷ the same 21–30 days before; > 1 marks an early-warning signal |

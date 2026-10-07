@@ -5,7 +5,7 @@ import { downloadCsv, truncateString } from "./telematicsFormat";
 
 export function ChartCard({ title, tooltip, badge, actions, className = "", children }) {
   return (
-    <div className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
+    <div className={`rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ${className}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex items-start gap-2">
           <ChartHeader title={title} tooltip={tooltip} />
@@ -77,12 +77,12 @@ export function Segmented({ value, onChange, options, size = "sm" }) {
 
 export function LocalSelect({ label, value, onChange, options }) {
   return (
-    <label className="flex items-center gap-1.5 text-xs text-slate-500">
+    <label className="flex items-center gap-1.5 text-sm text-slate-500">
       {label}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+        className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -130,17 +130,35 @@ export function HeatGrid({
   minColWidth = 56,
   gapClass = "gap-1",
   colLabel = (c) => c.label,
+  scrollClass,
+  onColClick,
+  sortId,
+  sortDir,
 }) {
+  // scrollClass (e.g. "max-h-[32rem]") makes the grid scroll vertically with a sticky header row;
+  // onColClick makes the column headers sortable buttons (sortId / sortDir mark the active one).
+  const headCell = scrollClass ? "sticky top-0 z-10 bg-white" : "";
   return (
-    <div className="overflow-x-auto">
+    <div className={scrollClass ? `overflow-auto ${scrollClass}` : "overflow-x-auto"}>
       <div
         className={`grid ${gapClass} text-xs`}
         style={{ gridTemplateColumns: `minmax(${rowLabelWidth}px, auto) repeat(${cols.length}, minmax(${minColWidth}px, 1fr))` }}
       >
-        <div />
+        <div className={headCell} />
         {cols.map((c) => (
-          <div key={c.id} className="px-1 pb-1 text-center font-medium leading-tight text-slate-500" title={c.label}>
-            {colLabel(c)}
+          <div key={c.id} className={`${headCell} px-1 pb-1 text-center font-medium leading-tight text-slate-500`} title={onColClick ? `${c.label}: click to sort trucks by this signal` : c.label}>
+            {onColClick ? (
+              <button
+                type="button"
+                onClick={() => onColClick(c)}
+                className={`inline-flex items-center gap-0.5 rounded px-0.5 hover:text-slate-800 ${sortId === c.id ? "font-semibold text-sky-700" : ""}`}
+              >
+                {colLabel(c)}
+                {sortId === c.id && <span className="text-[9px]">{sortDir === "asc" ? "▲" : "▼"}</span>}
+              </button>
+            ) : (
+              colLabel(c)
+            )}
           </div>
         ))}
         {rows.map((r, ri) => (

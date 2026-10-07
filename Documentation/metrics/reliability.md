@@ -145,8 +145,22 @@ used and flagged "extrapolated".
   - greyed if fewer than 5 trucks; clicking a cell opens Part View.
 
 ## Tab 3 · Root Cause
-- **Failure-Mode Mix.** Stacked horizontal bars of `failure_mode` counts for the top 10 parts.
-  Clicking a bar opens Part View.
+- **Main Failure Cause by Part.** A ranked list (replaced the stacked "Failure-Mode Mix (Top 10
+  Parts)" bars on 2026-10-01: up to ~20 failure modes across 10 parts needed a 12-colour legend and
+  was hard to read).
+  - One row per part, for the `MAIN_CAUSE_PARTS` = 10 parts with the most failures (the same
+    ordering as the Field Life summaries).
+  - **Bar and count:** the part's failures (`fact_part_replacement` rows in scope), in a single
+    colour, scaled to the largest part.
+  - **Main cause line:** "Mostly {mode} ({share} %)", where mode = the most common `failure_mode`
+    of that part and share = its count ÷ the part's failures × 100. Ties are broken
+    alphabetically. A missing mode counts as "Unknown".
+  - **Clear target pill:** shown when the displayed (rounded) share ≥ `CLEAR_CAUSE_SHARE` = 40 % and the part has at least
+    `MIN_GROUP_FAILURES` = 5 failures. The main cause is then in bold. Otherwise the second mode is
+    shown in grey ("then {mode} ({share} %)").
+  - **Tooltip (hover):** every mode with its count and share.
+  - **Footnote:** how many of the listed parts have a clear target.
+  - Clicking a row opens Part View.
 - **Precursor Ramp (Part × Signal).** Heatmap built from `v_failure_precursor_summary`.
   - The view has one row per replacement × signal inside the telemetry window.
   - ramp = mean(`late_mean_abs_z`, days 1–7 before) ÷ mean(`early_mean_abs_z`, days 21–30

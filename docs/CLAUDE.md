@@ -32,6 +32,7 @@ Consumed in `src/lib/supabaseClient.js`.
 src/
   main.jsx, App.jsx                     — router; all routes nested under DashboardLayout
   components/layout/DashboardLayout.jsx — dark top nav + white filter sidebar + <Outlet/>
+  components/layout/TruckSwitcher.jsx   — searchable truck picker (sidebar Active Vehicle card, Asset View)
   components/kpi/KpiCard.jsx            — shared KPI tile
   components/ui/ChartHeader.jsx, InfoTooltip.jsx — shared chart UI
   store/useFilterStore.js               — global filters (Zustand)
@@ -67,10 +68,10 @@ Helpers like `resolveStartDate`, `toIsoDateString`, `fetchAllRows` are duplicate
 | Route | Module | Hook | Focus |
 |---|---|---|---|
 | `/` | OverviewModule | useOverviewData | **New data model.** Service-engineer landing page: Trucks at Risk, Active Faults, Due ≤ 14 days, Fleet Uptime, Data Completeness; risk posture donut, early-warning trend, Region × Model risk matrix, top failing parts; Workshop Action List (cross-filtered). Formulas: `Documentation/metrics/overview.md` |
-| `/vehicle-diagnostics` | DiagnosticsModule (tabs in `?tab=faults` / `signals`) | useDiagnosticsData (`useDiagnosticsFleetData`, `useSignalHealthData` (lazy, reads `mv_telemetry_daily`), `useDiagnosticsAssetData`; fetch only) + `modules/diagnostics/diagnosticsMetrics.js` (all formulas) | **New data model.** Fault Codes tab (the former DTC Analysis plan): lamp / severity KPIs, DTC rate per 10k km, Pareto, System × Model heatmap, lifecycle, freeze-frame scatter, active DTC table, code drawer. Signal Health tab: truck × signal map, band strips, anomaly trend, DPF / SCR, wear forecast, anomaly → DTC lead time. Asset View (`?signal=` focus): signal small multiples, DTC Gantt + freeze frame, part risk trend, workshop prep, service history. Formulas: `Documentation/metrics/diagnostics.md` |
+| `/vehicle-diagnostics` | DiagnosticsModule (tabs in `?tab=faults` / `signals`) | useDiagnosticsData (`useDiagnosticsFleetData`, `useSignalHealthData` (lazy, reads `mv_telemetry_daily`), `useDiagnosticsAssetData`; fetch only) + `modules/diagnostics/diagnosticsMetrics.js` (all formulas) | **New data model.** Fault Codes tab (the former DTC Analysis plan): lamp / severity KPIs, DTC rate per 10k km, Most Common Faults (distinct trucks, plain names), System × Model heatmap, lifecycle, freeze-frame scatter, active DTC table, code drawer. Signal Health tab: truck × signal map (all trucks; sort by risk / VIN / model / any signal), band strips, anomaly trend, DPF / SCR, wear forecast, anomaly → DTC lead time. Asset View (`?signal=` focus): signal small multiples, DTC Gantt (click a bar for the freeze-frame popup), part risk trend, workshop prep, service history. Formulas: `Documentation/metrics/diagnostics.md` |
 | `/component-reliability` | ReliabilityModule (tabs in `?tab=life` / `quality` / `cause`, `?part=` → PartView) | useReliabilityData (`useReliabilityData`, `usePartPrecursor`; fetch only) + `modules/reliability/reliabilityMetrics.js` | **New data model**, lifetime data (date range ignored). Renewal part life + censoring → weighted Kaplan–Meier, Weibull (β, η, B10), β × η map, hazard, variance master; supplier scorecard, tier check, build cohort, where parts fail; failure modes, precursor ramp, DTC → part confirmation; Part View. Formulas: `Documentation/metrics/reliability.md` |
 | `/financial-warranty` | FinancialWarrantyModule | useFinancialData | Projected exposure, preventable savings (60%), cost per breakdown, highest-cost supplier, 90-day cumulative risk curve, exposure by subsystem, cost by telematics anomaly |
-| `/telematics-data` | TelematicsModule (tabs in `?tab=`) | useTelematicsData (`useTelematicsFleetData`, `useTelematicsAssetData`, `useVehicleDayTrace`; fetch only) + `modules/telematics/telematicsMetrics.js` (all formulas) | **New data model.** Tabs: Utilization & Uptime, Fuel/Energy/CO₂ (incl. EV section, model benchmark), Driver Safety (local event filters, driver panel), Data Health. Asset: day trace from `fact_vehicle_status`, trip log, event log. Formulas: `Documentation/metrics/telematics.md` |
+| `/telematics-data` | TelematicsModule (tabs in `?tab=`) | useTelematicsData (`useTelematicsFleetData`, `useTelematicsAssetData`, `useVehicleDayTrace`; fetch only) + `modules/telematics/telematicsMetrics.js` (all formulas) | **New data model.** Tabs: Utilization & Uptime, Fuel/Energy/CO₂ (incl. EV section, model benchmark), Driver Safety (local event filters, group by model / application / region; no per-driver views), Data Health. Asset: day trace from `fact_vehicle_status`, trip log, event log. Formulas: `Documentation/metrics/telematics.md` |
 | (none) | SupplyChainModule | useSupplyChainData | Inventory / stockout / depot deficit. **Import, route and nav all commented out.** |
 
 ## Key constants / business rules
@@ -81,7 +82,7 @@ Helpers like `resolveStartDate`, `toIsoDateString`, `fetchAllRows` are duplicate
   the latest day or no report for 48 h; rankings use a local km threshold (default 500)
 - **Diagnostics:** band state from `dim_signal` (direction-aware warn / crit thresholds, normal
   band); anomaly = `fact_telemetry.is_anomalous`; RSL / PL → "Immediate Service", AWL / MIL → "Plan
-  Workshop"; Pareto top 15; heatmap worst 40 trucks; wear slope needs ≥ 5 days; lead-time look-back
+  Workshop"; most common faults top 10; signal map lists all trucks; wear slope needs ≥ 5 days; lead-time look-back
   30 days; risk bands as in the Overview
 - **Reliability:** km (design B10 miles × 1.609344); ≥ 5 failures to rate a group, ≥ 10 for a
   Weibull fit, ≥ 3 per precursor cell; hazard Critical < −20 % / Watch < 0; repeat = 10,000 km or

@@ -37,7 +37,7 @@ function FleetTelematicsView() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-base font-semibold text-slate-800">Fleet Telematics &amp; Operations</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Fleet Telematics &amp; Operations</h1>
           <p className="text-xs text-slate-500">
             {raw.period
               ? `${raw.vehicles.length} connected trucks · ${formatDay(raw.period.startStr)} – ${formatDay(raw.period.endStr)} (latest data day)`
