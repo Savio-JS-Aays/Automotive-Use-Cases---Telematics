@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Clock, Gauge, Repeat, ShieldCheck, Target, TrendingDown } from "lucide-react";
+import { Clock, Gauge, Repeat, Target, TrendingDown } from "lucide-react";
 import { CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip as RechartsTooltip, XAxis, YAxis, ZAxis } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import { GROUP_TYPES, HAZARD_COLORS, HAZARD_STATUSES, HAZARD_STYLES, MIN_WEIBULL_FAILURES, failurePatternMap, formatKm, reliabilityKpis } from "./reliabilityMetrics";
@@ -47,8 +47,6 @@ export default function FieldLifeTab({ lt, summaries, loading, onOpenPart }) {
     { key: "type", label: "Type", render: (r) => `${r.partType ?? "—"} · ${r.subsystem ?? ""}`, sortValue: (r) => r.partType, csv: (r) => r.partType },
     { key: "n", label: "Failures", align: "right", render: (r) => formatNumber(r.failures), sortValue: (r) => r.failures, csv: (r) => r.failures },
     { key: "susp", label: "Running", align: "right", render: (r) => formatNumber(r.suspensions), sortValue: (r) => r.suspensions, csv: (r) => Math.round(r.suspensions) },
-    { key: "beta", label: "Beta (β)", align: "right", render: (r) => (r.beta !== null ? r.beta.toFixed(2) : "—"), sortValue: (r) => r.beta, csv: (r) => r.beta?.toFixed(3) ?? "" },
-    { key: "eta", label: "Eta (η)", align: "right", render: (r) => formatKm(r.eta), sortValue: (r) => r.eta, csv: (r) => (r.eta ? Math.round(r.eta) : "") },
     {
       key: "b10",
       label: "Field B10",
@@ -72,7 +70,7 @@ export default function FieldLifeTab({ lt, summaries, loading, onOpenPart }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           title="Parts Below Design B10"
           value={`${kpis.partsBelowDesign} / ${kpis.partsRated}`}
@@ -103,15 +101,6 @@ export default function FieldLifeTab({ lt, summaries, loading, onOpenPart }) {
           iconColorClass="text-sky-600"
           loading={loading}
           tooltip="Mean km between part failures per truck: total km driven by the trucks in scope ÷ unplanned part replacements."
-        />
-        <KpiCard
-          title="Predicted Before Failure"
-          value={formatPct(kpis.predictedPct)}
-          icon={ShieldCheck}
-          iconBgClass="bg-emerald-50"
-          iconColorClass="text-emerald-600"
-          loading={loading}
-          tooltip="Share of replacements done on a predicted (planned-in-advance) visit rather than after a breakdown or a reactive repair. History before telematics has no predictions, so this rises over time."
         />
         <KpiCard
           title="Downtime per Failure"

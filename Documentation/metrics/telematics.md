@@ -10,7 +10,7 @@
 > - Module status: **Implemented (new data model)**, 2026-10-01. Nav link: "Telematics".
 > - Audience: fleet manager (utilization, fuel), safety manager (drivers), OEM connected
 >   services (data health), OEM product / pre-sales (model benchmark).
-> - Last updated: 2026-10-01
+> - Last updated: 2026-10-09
 
 ## Principles
 - **Fleet View = 4 tabs**; the tab is kept in the URL (`?tab=utilization|fuel|safety|data`).
@@ -388,20 +388,18 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 | Active DTCs (NOW) | count of active DTC events; subtitle red lamp (`RSL`) / derate count. Click → Diagnostics |
 
 ### Charts
-**Day Trace: Speed, Engine and Driver State**
+**Day Trace: Speed & Fuel Level** (State of charge for BEV)
 - **Source:** `fact_vehicle_status` for one day (`useVehicleDayTrace`, loaded separately).
-- **Line:** `wheel_speed_kmh` against time.
+- **Line (left axis):** `wheel_speed_kmh` against time.
+- **Line (right axis, 0–100 %):** `fuel_level_pct` (diesel) or `soc_pct` (BEV) for the same day.
+  Steps up are refuels / charging; a drop while parked is a possible fuel-theft signal.
 - **Dots:** harsh events at `speed_before_kmh`, coloured by severity.
 - **Reference:** 80 km/h line.
-- **Strips:**
-  - `engine_state` (running / ready green, idle amber, PTO violet);
-  - tachograph `driver_working_state`.
 - **Day chips:** the 7 available days, default the latest.
 - **Trip zoom:** clicking a trip in the trip log narrows the trace to that `trip_id`. Trips older
   than 7 days only filter the event log, with a notice.
-
-**Fuel level / State of charge**
-- **Formula:** `fuel_level_pct` (diesel) or `soc_pct` (BEV) for the same day.
+- **Removed 2026-10-09:** the engine-state and tachograph strips, and the separate
+  "Fuel level (Selected Day)" chart, which is now the second line here.
 
 **Daily Distance & Engine Hours**
 - **Formula:** `distance_km` bars and `engine_hours` line per day.

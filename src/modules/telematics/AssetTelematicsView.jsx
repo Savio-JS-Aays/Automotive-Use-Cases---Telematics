@@ -7,7 +7,6 @@ import {
   ComposedChart,
   Legend,
   Line,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Scatter,
@@ -18,7 +17,7 @@ import {
 import KpiCard from "../../components/kpi/KpiCard";
 import { useTelematicsAssetData, useVehicleDayTrace } from "../../hooks/useTelematicsData";
 import { useFilterStore } from "../../store/useFilterStore";
-import { EVENT_LABELS, OVERSPEED_LIMIT_KMH, assetDailyTrend, assetKpis, assetTrips, speedTrace, stateSpans } from "./telematicsMetrics";
+import { EVENT_LABELS, OVERSPEED_LIMIT_KMH, assetDailyTrend, assetKpis, assetTrips, speedTrace } from "./telematicsMetrics";
 import {
   AXIS_LINE,
   AXIS_TICK,
@@ -34,36 +33,9 @@ import {
 } from "./telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill } from "./TelematicsUi";
 
-const ENGINE_STATE_COLORS = { running: "#10b981", ready: "#10b981", idle: "#f59e0b", pto: "#8b5cf6", off: "#e2e8f0", unknown: "#cbd5e1" };
-const WORK_STATE_COLORS = { DRIVE: "#0ea5e9", WORK: "#8b5cf6", DRIVER_AVAILABLE: "#cbd5e1", REST: "#e2e8f0", unknown: "#f1f5f9" };
 const SEVERITY_COLORS = { high: "#e11d48", medium: "#f59e0b", low: "#64748b" };
 
-function StateStrip({ label, spans, colors, domain }) {
-  const [min, max] = domain;
-  const width = max - min;
-  if (width <= 0) return null;
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 text-right text-[11px] text-slate-400">{label}</span>
-      <div className="relative h-3 flex-1 overflow-hidden rounded bg-slate-50">
-        {spans.map((s) => (
-          <div
-            key={`${s.start}-${s.state}`}
-            title={`${s.state} · ${formatClock(s.start)}–${formatClock(s.end)}`}
-            className="absolute top-0 h-full"
-            style={{
-              left: `${((s.start - min) / width) * 100}%`,
-              width: `${Math.max(0.3, ((s.end - s.start) / width) * 100)}%`,
-              backgroundColor: colors[s.state] ?? colors.unknown,
-            }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TraceTooltip({ active, payload }) {
+function TraceTooltip({ active, payload, levelLabel }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   return (
@@ -76,7 +48,7 @@ function TraceTooltip({ active, payload }) {
       ) : (
         <>
           <p className="text-slate-600">{p.speed === null ? "—" : `${p.speed.toFixed(0)} km/h`}</p>
-          <p className="text-slate-400">engine {p.state}</p>
+          {p.level !== null && p.level !== undefined && <p className="text-slate-400">{levelLabel} {Number(p.level).toFixed(1)}%</p>}
         </>
       )}
     </div>
@@ -99,8 +71,6 @@ export default function AssetTelematicsView({ vehicleId }) {
   const trips = useMemo(() => assetTrips(raw), [raw]);
   const trace = useMemo(() => speedTrace(dayTrace.trace, tripId), [dayTrace.trace, tripId]);
   const domain = trace.points.length ? [trace.points[0].t, trace.points[trace.points.length - 1].t] : [0, 0];
-  const engineSpans = useMemo(() => stateSpans(trace.points, "state"), [trace.points]);
-  const workSpans = useMemo(() => stateSpans(trace.points, "workState"), [trace.points]);
 
   const events = useMemo(
     () =>
@@ -244,9 +214,9 @@ export default function AssetTelematicsView({ vehicleId }) {
       </div>
 
       <ChartCard
-        title="Day Trace: Speed, Engine and Driver State"
+        title={`Day Trace: Speed & ${levelLabel}`}
         badge="NOW"
-        tooltip="rFMS 5-minute snapshots for one day: wheel speed (line) with harsh events as dots coloured by severity; the strips show engine state (green running, amber idle, violet PTO) and tachograph working state (blue drive, violet work). The dashed line is the 80 km/h governed limit. Pick a day, or click a trip in the log to zoom to it."
+        tooltip={`rFMS 5-minute snapshots for one day: wheel speed (blue line, left axis) with harsh events as dots coloured by severity, and ${bev ? "battery state of charge" : "tank level"} (dark line, right axis). The dashed line is the 80 km/h governed limit. ${bev ? "Steps up in charge are charging sessions." : "Steps up in level are refuels; a drop while parked is a possible fuel-theft signal."} Pick a day, or click a trip in the log to zoom to it.`}
         actions={
           <div className="flex flex-wrap items-center gap-1">
             {raw.traceDays.map((d) => (
@@ -285,54 +255,27 @@ export default function AssetTelematicsView({ vehicleId }) {
           <EmptyChart message="The truck did not run on this day or trip." />
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={300}>
               <ComposedChart margin={{ right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
                 <XAxis type="number" dataKey="t" domain={domain} tickFormatter={formatClock} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={32} />
-                <YAxis dataKey="speed" unit=" km/h" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={60} domain={[0, "auto"]} />
-                <RechartsTooltip content={<TraceTooltip />} />
-                <ReferenceLine y={OVERSPEED_LIMIT_KMH} stroke="#e11d48" strokeDasharray="4 4" />
-                <Line data={trace.points} dataKey="speed" name="Speed" stroke="#0ea5e9" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                <Scatter data={trace.events} dataKey="speed" name="Events" shape={(props) => (
+                <YAxis yAxisId="speed" dataKey="speed" unit=" km/h" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={60} domain={[0, "auto"]} />
+                <YAxis yAxisId="level" orientation="right" domain={[0, 100]} unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={40} />
+                <RechartsTooltip content={<TraceTooltip levelLabel={levelLabel} />} />
+                <Legend verticalAlign="bottom" height={24} iconType="circle" wrapperStyle={LEGEND_STYLE} />
+                <ReferenceLine yAxisId="speed" y={OVERSPEED_LIMIT_KMH} stroke="#e11d48" strokeDasharray="4 4" />
+                <Line yAxisId="speed" data={trace.points} dataKey="speed" name="Speed" stroke="#0ea5e9" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                <Line yAxisId="level" data={trace.points} dataKey="level" name={levelLabel} stroke={bev ? "#10b981" : "#0f172a"} strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+                <Scatter yAxisId="speed" data={trace.events} dataKey="speed" name="Events" shape={(props) => (
                   <circle cx={props.cx} cy={props.cy} r={5} fill={SEVERITY_COLORS[props.payload.severity] ?? "#64748b"} stroke="#fff" strokeWidth={1.5} />
                 )} />
               </ComposedChart>
             </ResponsiveContainer>
-            <div className="mt-2 space-y-1.5 pl-[60px] pr-2">
-              <StateStrip label="Engine" spans={engineSpans} colors={ENGINE_STATE_COLORS} domain={domain} />
-              <StateStrip label="Tachograph" spans={workSpans} colors={WORK_STATE_COLORS} domain={domain} />
-            </div>
           </>
         )}
       </ChartCard>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard
-          title={`${levelLabel} (Selected Day)`}
-          badge="NOW"
-          tooltip={
-            bev
-              ? "Battery state of charge through the day. Steps up are charging sessions; a steep slope means a heavy or hot route."
-              : "Tank level through the day. Steps up are refuels. A drop while parked is a possible fuel-theft signal worth investigating."
-          }
-        >
-          {loading || dayTrace.loading ? (
-            <ChartSkeleton height="h-52" />
-          ) : trace.points.every((p) => p.level === null) ? (
-            <EmptyChart height="h-52" message="No level readings for this day." />
-          ) : (
-            <ResponsiveContainer width="100%" height={210}>
-              <LineChart data={trace.points}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                <XAxis type="number" dataKey="t" domain={domain} tickFormatter={formatClock} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={32} />
-                <YAxis domain={[0, 100]} unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={40} />
-                <RechartsTooltip labelFormatter={formatClock} formatter={(v) => [`${Number(v).toFixed(1)}%`, levelLabel]} />
-                <Line dataKey="level" stroke={bev ? "#10b981" : "#0f172a"} strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
+      <div className="grid grid-cols-1 gap-4">
         <ChartCard
           title="Daily Distance & Engine Hours"
           badge="PERIOD"

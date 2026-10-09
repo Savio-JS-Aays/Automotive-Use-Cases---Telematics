@@ -263,8 +263,6 @@ export function faultKpis(raw) {
     bySeverity: { critical: 0, major: 0, minor: 0 },
     rate: null,
     rateDeltaPct: null,
-    derateEvents: 0,
-    derateConversion: null,
     meanDaysToClear: null,
     clearedCount: 0,
     intermittentShare: null,
@@ -294,9 +292,6 @@ export function faultKpis(raw) {
   const rate = ratio(cur.length, kmCur, 10000);
   const prevRate = ratio(prev.length, kmPrev, 10000);
 
-  const derateable = cur.filter((e) => e.dim_dtc?.can_derate);
-  const derateEvents = cur.filter((e) => e.caused_derate).length;
-
   const cleared = raw.dtcEvents.filter((e) => e.cleared_ts && inCurrent(period, dayOf(e.cleared_ts)));
   const clearDays = cleared.map((e) => (new Date(e.cleared_ts) - new Date(e.first_seen_ts)) / DAY_MS);
 
@@ -307,8 +302,6 @@ export function faultKpis(raw) {
     bySeverity,
     rate,
     rateDeltaPct: rate !== null && prevRate ? ((rate - prevRate) / prevRate) * 100 : null,
-    derateEvents,
-    derateConversion: ratio(derateable.filter((e) => e.caused_derate).length, derateable.length, 100),
     meanDaysToClear: clearDays.length ? clearDays.reduce((s, v) => s + v, 0) / clearDays.length : null,
     clearedCount: cleared.length,
     intermittentShare: ratio(allCur.length - cur.length, allCur.length, 100),

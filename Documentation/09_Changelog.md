@@ -3,7 +3,19 @@
 > Dated record of feature, data-model and documentation changes. Add an entry for every
 > change, newest first.
 >
-> Last updated: 2026-10-08
+> Last updated: 2026-10-09
+
+## 2026-10-09 — Beta and Eta columns removed from Component Variance Master
+- **Component Reliability → Field Life:** the Beta (β) and Eta (η) columns are removed from the table. The Weibull fit is still computed and still drives the failure-pattern map, the extrapolated B10 flag and the hazard status.
+
+## 2026-10-09 — Predicted Before Failure KPI removed
+- **Component Reliability → Field Life:** the Predicted Before Failure card is removed; the KPI row is now five cards. The per-part "Predicted" card in Part View is unchanged.
+
+## 2026-10-09 — Derate Events KPI removed
+- **Vehicle Diagnostics → Fault Codes:** the Derate Events card (and its derate-conversion subtitle) is removed; the KPI row is now four cards. The "Escalated to derate" stage in the fault funnel and the per-code derate flags are unchanged.
+
+## 2026-10-09 — Day Trace merged with Fuel level
+- **Telematics → Asset View:** "Day Trace: Speed, Engine and Driver State" is now "Day Trace: Speed & Fuel Level" (State of charge for BEV). The engine and tachograph strips are removed, and the separate "Fuel level (Selected Day)" chart is merged in as a second line on a right-hand 0–100 % axis. Daily Distance & Engine Hours now spans the full width.
 
 ## 2026-10-08 — Wear Forecast removed
 - **Vehicle Diagnostics → Signal Health:** the Wear Forecast: Nearest to Limit chart is removed.

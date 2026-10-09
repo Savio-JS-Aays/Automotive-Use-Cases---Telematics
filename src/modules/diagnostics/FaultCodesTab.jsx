@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertOctagon, Gauge, Siren, Timer, Zap } from "lucide-react";
+import { AlertOctagon, Gauge, Siren, Timer } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -122,7 +122,7 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Trucks with Warning Lamp"
           badge="NOW"
@@ -158,17 +158,6 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
           iconColorClass="text-sky-600"
           loading={loading}
           tooltip="New non-intermittent fault codes first seen in the period ÷ km driven × 10,000. Normalising by distance makes fleets of different size and duty comparable. Sparkline = 7-day rolling."
-        />
-        <KpiCard
-          title="Derate Events"
-          badge="PERIOD"
-          value={formatNumber(kpis.derateEvents)}
-          subtitle={kpis.derateConversion !== null ? `${formatPct(kpis.derateConversion)} of derate-capable codes escalated` : "No derate-capable codes"}
-          icon={Zap}
-          iconBgClass="bg-violet-50"
-          iconColorClass="text-violet-600"
-          loading={loading}
-          tooltip="Fault codes that put the engine into reduced power (derate). The conversion rate shows how often a code that can derate actually did, a proxy for how late faults are being caught."
         />
         <KpiCard
           title="Mean Time to Clear"

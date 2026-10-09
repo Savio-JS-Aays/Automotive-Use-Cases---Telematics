@@ -9,7 +9,7 @@
 >   - UI in `modules/diagnostics/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01. The planned standalone DTC
 >   Analysis module is merged into the Fault Codes tab (see [dtc-analysis.md](dtc-analysis.md)).
-> - Last updated: 2026-10-08
+> - Last updated: 2026-10-09
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags in `FaultCodesTab.jsx` / `SignalHealthTab.jsx`; their formulas
@@ -87,7 +87,6 @@ below remain valid and the KPI cards still show.
 | Trucks with Warning Lamp | NOW | distinct trucks with an active DTC. Split: **red** = any active RSL / PL; **amber** = the rest |
 | Active Fault Codes | NOW | `count(status = 'active')`; subtitle by `dim_dtc.severity_class` |
 | DTC Rate per 10k km | PERIOD | new non-intermittent DTCs ÷ Σ `distance_km` × 10,000. Delta = % change vs the previous period (lower is good). Sparkline = 7-day rolling total |
-| Derate Events | PERIOD | `count(caused_derate)` among new DTCs. Subtitle = derate conversion = `count(caused_derate)` ÷ count of new DTCs whose code has `can_derate` |
 | Mean Time to Clear | PERIOD | mean(`cleared_ts − first_seen_ts`) in days, over events whose `cleared_ts` falls in the period. Subtitle: cleared count, and intermittent share = intermittent ÷ all DTCs first seen in the period |
 
 ### Charts and tables

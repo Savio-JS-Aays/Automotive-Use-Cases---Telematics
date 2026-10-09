@@ -8,7 +8,7 @@
 >   - `src/modules/reliability/reliabilityMetrics.js`: every formula below;
 >   - UI in `modules/reliability/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01
-> - Last updated: 2026-10-08
+> - Last updated: 2026-10-09
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags. Their formulas below remain valid; β, η and field B10
@@ -101,7 +101,6 @@ used and flagged "extrapolated".
 | Parts Below Design B10 | parts with ≥ 5 failures and variance < 0, out of the rated parts |
 | Worst Supplier Variance | min variance over part × supplier groups with ≥ 5 failures (clicking opens Part View) |
 | Fleet MTBF | Σ current odometer of the scope trucks ÷ total replacements |
-| Predicted Before Failure | `count(was_predicted)` ÷ replacements |
 | Downtime per Failure | mean `downtime_hours` of each replacement's repair order |
 | Repeat Repairs | repeat replacements ÷ replacements |
 
@@ -119,7 +118,7 @@ used and flagged "extrapolated".
   - rate = d ÷ (units at risk at the band start − suspensions in the band ÷ 2) × 1,000;
   - stops once fewer than 5 units are at risk.
 - **Component Variance Master.** Table, one row per part with at least one replacement, with
-  failures, running (suspensions), β, η, field B10 (and the extrapolated flag), design B10,
+  failures, running (suspensions), field B10 (and the extrapolated flag), design B10,
   variance, rate per 100k km and hazard status. Clicking a row opens Part View; CSV export.
 
 ## Tab 2 · Supplier & Build Quality

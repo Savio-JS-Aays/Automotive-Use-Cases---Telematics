@@ -381,7 +381,6 @@ export function reliabilityKpis(lt, summaries) {
     worst,
     fleetMtbf: fails.length ? fleetKm / fails.length : null,
     failures: fails.length,
-    predictedPct: fails.length ? (fails.filter((f) => f.predicted).length / fails.length) * 100 : null,
     meanDowntime: mean(downtimes),
     repeatPct: fails.length ? (fails.filter((f) => f.repeat).length / fails.length) * 100 : null,
     trucks: lt.vehicles.size,
