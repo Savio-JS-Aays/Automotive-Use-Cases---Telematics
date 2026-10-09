@@ -9,7 +9,7 @@
 >   - UI in `modules/diagnostics/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01. The planned standalone DTC
 >   Analysis module is merged into the Fault Codes tab (see [dtc-analysis.md](dtc-analysis.md)).
-> - Last updated: 2026-10-01
+> - Last updated: 2026-10-08
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags in `FaultCodesTab.jsx` / `SignalHealthTab.jsx`; their formulas
@@ -193,16 +193,8 @@ below remain valid and the KPI cards still show.
   - coloured by model; clicking a point opens Asset View.
 - **SCR NOx Conversion Efficiency by Model.** Per model and day: the 7-day rolling mean of
   truck-day `avg_value` of `SCR_EFFICIENCY`, with a warning reference line.
-- **Wear Forecast: Nearest to Limit** (toggle: `BRAKE_LINING_REMAINING` / `HV_SOH`). Per truck:
-  1. Fit a least-squares slope of daily `avg_value` against day index over the period (needs at
-     least 5 points).
-  2. remaining = latest − `crit_threshold` for low-is-bad signals, or `crit_threshold` − latest
-     for high-is-bad ones.
-  3. days to limit = remaining ÷ (the slope toward the limit). It is 0 if the value is already
-     past the limit; trucks not trending toward the limit are dropped.
-  4. km to limit = days × the truck's average km per day in the period.
-
-  The 10 trucks with the fewest days are shown. Bars are red at ≤ 14 days and amber at ≤ 45.
+- **Wear Forecast: Nearest to Limit.** Removed from the Signal Health tab (2026-10-08). `wearForecast`
+  in `diagnosticsMetrics.js` is now unused.
 - **Anomaly → DTC Lead Time.** Histogram, for each new non-intermittent DTC whose drifting signal
   exists in `dim_signal`:
   - lead time = first-seen date − the earliest day in [first seen − 30 days, first seen] where

@@ -21,7 +21,6 @@ import {
 import KpiCard from "../../components/kpi/KpiCard";
 import { modelColors } from "../telematics/telematicsMetrics";
 import {
-  WEAR_SIGNALS,
   anomalyTrend,
   bandDistribution,
   healthSignals,
@@ -33,7 +32,6 @@ import {
   signalTrendByModel,
   stateMeta,
   dpfScatter,
-  wearForecast,
 } from "./diagnosticsMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatNumber, formatPct } from "../telematics/telematicsFormat";
 import { ChartCard, ChartSkeleton, EmptyChart, HeatGrid, Segmented } from "../telematics/TelematicsUi";
@@ -76,7 +74,6 @@ function DpfTooltip({ active, payload }) {
 
 export default function SignalHealthTab({ raw, loading: fleetLoading, signalHealth, onOpenAsset }) {
   const [sort, setSort] = useState({ key: "risk", dir: "desc" });
-  const [wearCode, setWearCode] = useState(WEAR_SIGNALS[0].code);
   const { data: sig, error } = signalHealth;
   const loading = fleetLoading || signalHealth.loading;
 
@@ -90,8 +87,6 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
   const dpf = useMemo(() => dpfScatter(raw, latest), [raw, latest]);
   const scr = useMemo(() => signalTrendByModel(raw, sig, "SCR_EFFICIENCY"), [raw, sig]);
   const signalByCode = useMemo(() => new Map(sig.signals.map((s) => [s.signal_code, s])), [sig.signals]);
-  const wearSignal = signalByCode.get(wearCode);
-  const wear = useMemo(() => wearForecast(raw, sig, wearSignal), [raw, sig, wearSignal]);
   const colors = useMemo(() => modelColors(raw.vehicles), [raw.vehicles]);
 
   if (error) {
@@ -108,7 +103,6 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
   const scrSignal = signalByCode.get("SCR_EFFICIENCY");
   const dpfSoot = signalByCode.get("DPF_SOOT_LOAD");
   const dpfDp = signalByCode.get("DPF_DIFF_PRESSURE");
-  const wearAvailable = WEAR_SIGNALS.filter((w) => signals.some((s) => s.signal_code === w.code));
 
   return (
     <div className="space-y-4">
@@ -376,45 +370,6 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
         )}
       </div>
       )}
-
-      <ChartCard
-        title="Wear Forecast: Nearest to Limit"
-        badge="PERIOD"
-        tooltip="Least-squares trend of each truck's daily value over the period (at least 5 days), projected to the signal's critical threshold. Days to limit × the truck's average daily km gives km to limit. Trucks not wearing towards the limit are left out. Click a bar to open the truck."
-        actions={
-          wearAvailable.length > 1 ? (
-            <Segmented value={wearCode} onChange={setWearCode} options={wearAvailable.map((w) => ({ value: w.code, label: w.label }))} />
-          ) : null
-        }
-      >
-        {loading ? (
-          <ChartSkeleton />
-        ) : wear.length === 0 ? (
-          <EmptyChart message="No trucks are trending towards this limit in the period." />
-        ) : (
-          <ResponsiveContainer width="100%" height={Math.max(200, wear.length * 28 + 40)}>
-            <BarChart layout="vertical" data={wear} margin={{ left: 8, right: 24 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-              <XAxis type="number" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} unit=" d" />
-              <YAxis type="category" dataKey="vin" width={150} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-              <RechartsTooltip
-                formatter={(v, _n, item) => {
-                  const r = item.payload;
-                  return [
-                    `${formatNumber(v, 0)} days${r.kmToLimit !== null ? ` · ≈ ${formatNumber(r.kmToLimit)} km` : ""} (now ${formatNumber(r.latest, 1)} ${wearSignal?.unit ?? ""}, ${formatNumber(r.slopePerWeek, 2)} / week)`,
-                    "To critical limit",
-                  ];
-                }}
-              />
-              <Bar dataKey="daysToLimit" radius={[0, 3, 3, 0]} onClick={(d) => onOpenAsset(d.vehicleId ?? d.payload?.vehicleId, wearCode)} className="cursor-pointer">
-                {wear.map((r) => (
-                  <Cell key={r.vehicleId} fill={r.daysToLimit <= 14 ? "#e11d48" : r.daysToLimit <= 45 ? "#f59e0b" : "#0ea5e9"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </ChartCard>
     </div>
   );
 }

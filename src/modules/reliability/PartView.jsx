@@ -1,13 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import { ArrowLeft, Clock, Gauge, IndianRupee, ShieldCheck, Sigma, Target } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import { usePartPrecursor } from "../../hooks/useReliabilityData";
-import { GROUP_PALETTE, GROUP_TYPES, HAZARD_STYLES, formatKm, modeCounts, partFailureRows, precursorSignature, weibullPlot } from "./reliabilityMetrics";
+import { GROUP_PALETTE, HAZARD_STYLES, formatKm, modeCounts, partFailureRows, precursorSignature, weibullPlot } from "./reliabilityMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatInr, formatNumber, formatPct } from "../telematics/telematicsFormat";
-import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill, Segmented } from "../telematics/TelematicsUi";
-import { HazardChart, SurvivalChart, WeibullPlot } from "./ReliabilityCharts";
+import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill } from "../telematics/TelematicsUi";
+import { HazardChart, WeibullPlot } from "./ReliabilityCharts";
 import { VariancePill } from "./FieldLifeTab";
 
 const VISIT_STYLES = {
@@ -20,7 +20,6 @@ const VISIT_STYLES = {
 const SHOW = { weibullPlot: false };
 
 export default function PartView({ partId, raw, lt, summaries, loading, onBack, onOpenAsset }) {
-  const [groupType, setGroupType] = useState("supplier");
   const summary = summaries.find((s) => s.partId === partId);
   const part = lt.partsById.get(partId);
   const weibull = useMemo(() => weibullPlot(lt, partId), [lt, partId]);
@@ -134,25 +133,14 @@ export default function PartView({ partId, raw, lt, summaries, loading, onBack, 
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {SHOW.weibullPlot && (
+      {SHOW.weibullPlot && (
         <ChartCard
           title="Weibull Probability Plot"
           tooltip="Cumulative share failed (F) against km of part life on Weibull paper: a straight line means the Weibull model fits, its slope is β. One series per supplier with at least 5 failures (fit line from 10). A supplier line left of the others fails earlier; the green line is the design B10."
         >
           {loading ? <ChartSkeleton height="h-80" /> : <WeibullPlot groups={weibull} designKm={summary?.designKm} height={320} />}
         </ChartCard>
-        )}
-
-        <ChartCard
-          className={SHOW.weibullPlot ? "" : "xl:col-span-2"}
-          title="Survival by Group"
-          tooltip="Kaplan–Meier survival of this part split by supplier, model or application (groups with at least 5 failures, top 5). Parts still running are censored at their current km."
-          actions={<Segmented value={groupType} onChange={setGroupType} options={GROUP_TYPES} size="xs" />}
-        >
-          {loading ? <ChartSkeleton height="h-80" /> : <SurvivalChart lt={lt} partId={partId} groupType={groupType} designKm={summary?.designKm} height={320} />}
-        </ChartCard>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <ChartCard title="Failure Modes" tooltip="How this part failed, from the workshop's failure-mode code.">

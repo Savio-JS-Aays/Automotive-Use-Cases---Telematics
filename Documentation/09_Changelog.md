@@ -3,7 +3,13 @@
 > Dated record of feature, data-model and documentation changes. Add an entry for every
 > change, newest first.
 >
-> Last updated: 2026-10-07
+> Last updated: 2026-10-08
+
+## 2026-10-08 — Wear Forecast removed
+- **Vehicle Diagnostics → Signal Health:** the Wear Forecast: Nearest to Limit chart is removed.
+
+## 2026-10-08 — Survival by Group removed
+- **Component Reliability → Part View:** the Survival by Group chart (and its group-type selector) is removed.
 
 ## 2026-10-07 — UI restyle (KPI cards, filters, header, layout)
 - Visual only; no formulas, data or chart/bar/alert colours changed.

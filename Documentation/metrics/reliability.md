@@ -8,14 +8,14 @@
 >   - `src/modules/reliability/reliabilityMetrics.js`: every formula below;
 >   - UI in `modules/reliability/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01
-> - Last updated: 2026-10-01
+> - Last updated: 2026-10-08
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags. Their formulas below remain valid; β, η and field B10
 still appear in the KPI cards and in the Variance Master table.
 - Field Life: Failure-Pattern Map (β × η) and Survival Curve (Kaplan–Meier). The part selector now
   sits on the Hazard Rate chart.
-- Part View: Weibull Probability Plot. Survival by Group is still shown.
+- Part View: Weibull Probability Plot. Survival by Group is removed (2026-10-08).
 
 ## Scope and data
 - **Scope:**
@@ -187,7 +187,7 @@ used and flagged "extrapolated".
   - series for all suppliers plus each supplier with ≥ 5 failures (a fit line from 10);
   - axes are labelled in km and F % (1–99);
   - reference lines at the design B10 and at F = 10 %.
-- **Survival by Group.** Same as Field Life, fixed to this part.
+- **Survival by Group.** Removed from Part View (2026-10-08). The Field Life formulas are unchanged.
 - **Failure Modes** and **Hazard Rate by km.** Same formulas as above.
 - **Precursor Signature.**
   - x = days before replacement (−30 … −1); y = mean `mean_abs_z` over this part's replacements;
