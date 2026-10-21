@@ -10,7 +10,7 @@
 > - Module status: **Implemented (new data model)**, 2026-10-01. Nav link: "Telematics".
 > - Audience: fleet manager (utilization, fuel), safety manager (drivers), OEM connected
 >   services (data health), OEM product / pre-sales (model benchmark).
-> - Last updated: 2026-10-09
+> - Last updated: 2026-10-21
 
 ## Principles
 - **Fleet View = 4 tabs**; the tab is kept in the URL (`?tab=utilization|fuel|safety|data`).
@@ -60,8 +60,6 @@ in ~5–6 s over the network with no filters (measured 2026-10-01).
 | Name | Value | Use |
 |---|---|---|
 | `DIESEL_PRICE_INR_PER_L` | 90 | idle waste cost; same constant as the simulator |
-| `ADBLUE_NORMAL_PCT` / `ADBLUE_LOW_PCT` | 5.5 / 3 | AdBlue ratio reference / low flag |
-| `ADBLUE_MIN_FUEL_L` | 100 | minimum diesel before a truck's ratio is rated |
 | `ROLLING_DAYS` | 7 | every rolling series |
 | `MATRIX_MIN_TRUCKS` | 5 | Region × Model cells below this are grey, not rated |
 | `MIN_PREV_COVERAGE` | 0.8 | delta rule |
@@ -85,7 +83,6 @@ distribution and data health.
 | idlePct | `Σ idle_hours ÷ Σ engine_hours × 100` |
 | consumption | diesel: `Σ fuel_l ÷ Σ distance_km × 100` (L/100 km); BEV: `Σ energy_kwh ÷ Σ km × 100` |
 | idleCostInr | `Σ idle_fuel_l × 90` |
-| adbluePct | `Σ adblue_l ÷ Σ fuel_l × 100`, only if `Σ fuel_l ≥ 100` |
 | safety / eco | distance-weighted daily `safety_score` / `eco_score` |
 | completeness | `Σ packets_received ÷ Σ packets_expected × 100` |
 | lastPing | max `last_ping_ts` over all loaded days |
@@ -160,7 +157,7 @@ engine-off. A 24 h rule flagged 28 parked trucks as silent. Result on 2026-09-30
 ---
 
 ## Tab 2 · Fuel, Energy & CO₂
-Diesel-only cards (Idle Waste Cost, AdBlue, Diesel Split) are hidden when no diesel truck is in
+Diesel-only cards (Idle Waste Cost, Diesel Split) are hidden when no diesel truck is in
 scope.
 
 ### KPIs
@@ -169,8 +166,6 @@ scope.
 | Fuel Economy (diesel) / Energy Economy (BEV-only scope) | `Σ fuel_l ÷ Σ km × 100` over diesel vehicle-days; BEV `Σ energy_kwh ÷ Σ km × 100` shown in the subtitle | L (lower is better) |
 | Idle Waste Cost | `Σ idle_fuel_l × ₹90`; subtitle: `÷ N ÷ days × 30` per truck-month, litres | % change |
 | Idle Share | `Σ idle_hours ÷ Σ engine_hours × 100` | pp |
-| CO₂ Emitted | `Σ co2_kg ÷ 1000` t (`co2 = diesel L × 2.68`; BEV 0); subtitle kg / 100 km | % change |
-| AdBlue : Diesel | `Σ adblue_l ÷ Σ fuel_l × 100`; subtitle: trucks < 3 % | pp |
 
 ### Charts
 **Consumption Trend by Model** (line per model)
@@ -226,10 +221,8 @@ scope.
 |---|---|
 | Charging sessions | session count |
 | Energy charged | MWh |
-| Blended cost | `Σ cost_inr ÷ Σ energy_kwh` |
 | Public charging share | `public DC kWh ÷ total kWh` |
 | Charging spend | ₹ |
-| Regen share | `Σ regen_kwh ÷ (Σ energy_used_kwh + Σ regen_kwh)`; `energy_used_kwh` is net of regen |
 
 **Charging Mix**
 - **Formula:** kWh by `charger_type`.
@@ -242,7 +235,7 @@ scope.
 ### Table: Model Efficiency Benchmark
 - **One row per model:** trucks, km, actual vs rated consumption.
 - **Gap:** `(actual − rated) ÷ rated`; red when > +5 %.
-- **Also shown:** idle %, AdBlue %, CO₂ per 100 km, eco (distance-weighted trip `eco_score`).
+- **Also shown:** idle %.
 - **Controls:** sort, CSV.
 
 ---
@@ -263,8 +256,7 @@ computed from penalties by the simulator, so it ignores the event filter.
 
 **Other controls:**
 - **Severity:** all / high / medium / low.
-- **Group by:** Model (default) / Application / Region. Drives the Safety Risk chart and the
-  Safety Scorecard.
+- **Group by:** Model (default) / Application / Region. Drives the Safety Risk chart.
 - **"Rate drivers with":** ≥ 100 / 500 (default) / 1,000 / 3,000 km. Used by the score
   distribution, the quadrant and the Coach-now % column, to exclude small samples.
 - **Event:** a single type, set by clicking a matrix cell and shown as a chip.
@@ -275,7 +267,6 @@ computed from penalties by the simulator, so it ignores the event filter.
 | Fleet Safety Score | distance-weighted daily `safety_score` (formula in [02 §5](../02_Domain_Theory.md#5-driver-behaviour)) | pts |
 | Events per 1,000 km | `count(filtered events) ÷ Σ distance_km × 1000` | lower is better |
 | High-Severity Events | `count(filtered events with severity = high)` | — |
-| Eco Score | distance-weighted trip `eco_score` | — |
 | ADAS Activations | ADAS-family events on `adas_equipped` trucks ÷ their km × 1000 | — |
 
 ### Charts
@@ -316,28 +307,6 @@ computed from penalties by the simulator, so it ignores the event filter.
 **Time in Speed Bands** (100 % stacked bar)
 - **Formula:** `Σ speed_class_s` per band (0–30, 30–50, 50–70, 70–80, > 80 km/h) ÷ total.
 - **Local filter:** by application or by model.
-
-### Table: Safety Scorecard by Model / Application / Region
-Replaces "Driver Scorecard" (2026-10-01). One row per group, following the Group by toggle.
-
-| Column | Formula |
-|---|---|
-| Group | model, application or region |
-| Band | pill from the group's safety score: Coach now < 70, Watch 70–85, Good ≥ 85. "Not rated" when the group has fewer than 5 trucks |
-| Safety | distance-weighted daily `safety_score` over the group's vehicle-days |
-| Δ | current − previous period, shown when the previous period has ≥ 3 vehicle-days for the group |
-| Eco | trip `eco_score` weighted by `distance_km` |
-| Distance, Trucks | `Σ distance_km`; trucks with km > 0 |
-| Drivers | distinct `driver_id` on the group's vehicle-days |
-| Events / 1k km | `count(filtered events) ÷ Σ km × 1000` |
-| High severity | `high-severity events ÷ filtered events` |
-| Top Event | most frequent filtered event type |
-| Coach now | share of the group's drivers (those with at least the "Rate drivers with" km in the group) whose distance-weighted safety is below 70. A percentage only: nobody is named |
-
-- **Controls:** search, sort (default events / 1k km descending), CSV.
-- **No drill-down:** groups are not click targets.
-
----
 
 ## Tab 4 · Data Health
 ### KPIs
@@ -381,7 +350,6 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 | KPI | Formula |
 |---|---|
 | Safety Score | distance-weighted daily `safety_score`; subtitle events, events / 1k km |
-| Eco Score | distance-weighted daily `eco_score` |
 | Distance | Σ km; operating days / days; km per operating day |
 | Fuel Economy / Energy Use | `Σ fuel_l (or energy_kwh) ÷ Σ km × 100`; delta = `(actual − rated) ÷ rated` labelled "vs rated" |
 | Idle Share | idle h ÷ engine h; diesel subtitle `Σ idle_fuel_l × ₹90` |
@@ -397,7 +365,7 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 - **Reference:** 80 km/h line.
 - **Day chips:** the 7 available days, default the latest.
 - **Trip zoom:** clicking a trip in the trip log narrows the trace to that `trip_id`. Trips older
-  than 7 days only filter the event log, with a notice.
+  than 7 days have no trace and show a notice.
 - **Removed 2026-10-09:** the engine-state and tachograph strips, and the separate
   "Fuel level (Selected Day)" chart, which is now the second line here.
 
@@ -411,19 +379,12 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 - **Controls:** search, CSV.
 - **Drill-down:** click → trip zoom.
 
-**Harsh & ADAS Event Log**
-- **Columns:** time, type, severity pill, speed before → after, peak g, source, position.
-- **Position:** links to OpenStreetMap.
-- **Trip filter:** follows the selected trip.
-- **Controls:** CSV.
-
 ---
 
 ## Verification (2026-10-01, Last 30 Days, no filters)
 - **Utilization:** 32.84 %, matching an independent `Σ engine_hours ÷ (6,000 vehicle-days × 24)`.
 - **Uptime:** 97.8 %.
-- **Fuel:** 30.9 L / 100 km diesel, 106 kWh / 100 km BEV; idle waste ₹13.57 L; CO₂ 969 t;
-  AdBlue 5.49 %.
+- **Fuel:** 30.9 L / 100 km diesel, 106 kWh / 100 km BEV; idle waste ₹13.57 L; CO₂ 969 t.
 - **Safety:** score 86.6; 6.14 events / 1,000 km.
 - **Data:** completeness 96.2 %; East is weakest at 91.8 %.
 - **Model benchmark:** 3528C is +48.5 % over rated (tipper / mining duty cycle, 30 % idle);

@@ -8,7 +8,7 @@
 >   - `src/modules/reliability/reliabilityMetrics.js`: every formula below;
 >   - UI in `modules/reliability/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01
-> - Last updated: 2026-10-09
+> - Last updated: 2026-10-21
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags. Their formulas below remain valid; β, η and field B10
@@ -27,7 +27,7 @@ still appear in the KPI cards and in the Variance Master table.
   subset and are not used.
 - **Other sources:**
   - `dim_part` (design B10 in miles × 1.609344 = km);
-  - `dim_supplier` (`risk_tier`);
+  - `dim_supplier` (`supplier_name`; `risk_tier` is no longer read by the dashboard);
   - the `fact_vehicle_daily.odometer_km_end` of the latest day, as the current odometer;
   - tagged `fact_repair_orders` (not planned), for `downtime_hours`;
   - `fact_dtc_event` (`resolved_by_ro_id`);
@@ -124,14 +124,9 @@ used and flagged "extrapolated".
 ## Tab 2 · Supplier & Build Quality
 - **Supplier Scorecard.**
   - part × supplier groups with ≥ 5 failures: field B10 ÷ design B10 × 100, the worst 15;
-  - coloured by `risk_tier`; labelled with n;
+  - single colour, no supplier risk tier (removed 2026-10-21); labelled with n;
   - a reference line marks 100 %.
-- **Risk Tier Check.**
-  - per tier: the median scorecard % across all of that tier's groups with ≥ 5 failures (not only
-    the worst 15);
-  - labels show the group count.
-  - A raw failures-per-km comparison by tier was tested and rejected. It was confounded by part
-    mix and by attributing factory-fitted parts via replacement share.
+- **Risk Tier Check.** Removed 2026-10-21.
 - **Build Cohort × Age at Failure.** Heatmap.
   - rows = production quarter (`production_date`), with the truck count;
   - columns = vehicle age at failure (`vehicle_age_days` ÷ 30.4375): 0–12 / 12–24 / 24–36 /
@@ -187,7 +182,7 @@ used and flagged "extrapolated".
   - axes are labelled in km and F % (1–99);
   - reference lines at the design B10 and at F = 10 %.
 - **Survival by Group.** Removed from Part View (2026-10-08). The Field Life formulas are unchanged.
-- **Failure Modes** and **Hazard Rate by km.** Same formulas as above.
+- **Hazard Rate by km.** Same formula as above. The Failure Modes bar chart was removed from Part View (2026-10-21); the failure mode is still a column in the Replacements table and drives the Root Cause tab.
 - **Precursor Signature.**
   - x = days before replacement (−30 … −1); y = mean `mean_abs_z` over this part's replacements;
   - the 4 signals with the highest ramp (days 1–7 ÷ days 21–30) are shown.

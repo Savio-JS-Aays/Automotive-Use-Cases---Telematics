@@ -1,6 +1,5 @@
 import React from 'react';
 import { HelpCircle } from 'lucide-react';
-import { Line, LineChart, ResponsiveContainer } from 'recharts';
 
 const BADGE_STYLES = {
   NOW: 'bg-sky-50 text-sky-700',
@@ -24,24 +23,6 @@ function accentFor(iconColorClass) {
   return ACCENT_BORDERS[name] ?? ACCENT_BORDERS.sky;
 }
 
-function DeltaText({ delta }) {
-  if (!delta || delta.value === null || delta.value === undefined || Number.isNaN(delta.value)) {
-    return null;
-  }
-  const { value, unit = '', positiveIsGood = true, label = 'vs prev. period' } = delta;
-  const isFlat = Math.abs(value) < 0.05;
-  const isGood = isFlat ? null : value > 0 === positiveIsGood;
-  const colorClass = isGood === null ? 'text-slate-400' : isGood ? 'text-emerald-600' : 'text-rose-600';
-  const sign = value > 0 ? '+' : '';
-  return (
-    <span className={`text-xs font-medium ${colorClass}`}>
-      {sign}
-      {value.toFixed(1)}
-      {unit} <span className="font-normal text-slate-400">{label}</span>
-    </span>
-  );
-}
-
 export default function KpiCard({
   title,
   value,
@@ -49,11 +30,7 @@ export default function KpiCard({
   iconColorClass = 'text-sky-600',
   loading = false,
   tooltip,
-  subtitle,
   badge,
-  delta,
-  sparkline,
-  sparklineColor = '#0ea5e9',
   onClick,
 }) {
   const interactive = typeof onClick === 'function';
@@ -100,28 +77,6 @@ export default function KpiCard({
         ) : (
           <>
             <div className="text-[32px] font-bold leading-tight tracking-tight text-slate-900">{value}</div>
-            {subtitle && <div className="mt-1.5 text-[13px] text-slate-500">{subtitle}</div>}
-            {delta && (
-              <div className="mt-1">
-                <DeltaText delta={delta} />
-              </div>
-            )}
-            {sparkline && sparkline.length > 1 && (
-              <div className="mt-2 h-8">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={sparkline}>
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke={sparklineColor}
-                      strokeWidth={1.5}
-                      dot={false}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
           </>
         )}
       </div>

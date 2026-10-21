@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { AlertTriangle, Leaf, ScanEye, ShieldCheck, Siren } from "lucide-react";
+import { AlertTriangle, ScanEye, ShieldCheck, Siren } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -35,7 +35,7 @@ import {
   safetyByGroup,
 } from "./telematicsMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatNumber, truncateString } from "./telematicsFormat";
-import { ChartCard, ChartSkeleton, DataTable, EmptyChart, FilterChips, HeatGrid, LocalSelect, Pill, Segmented } from "./TelematicsUi";
+import { ChartCard, ChartSkeleton, EmptyChart, FilterChips, HeatGrid, LocalSelect, Segmented } from "./TelematicsUi";
 
 const MIN_KM_OPTIONS = [
   { value: "100", label: "≥ 100 km" },
@@ -154,7 +154,7 @@ export default function DriverSafetyTab({ raw, loading }) {
         <FilterChips chips={chips} onRemove={removeChip} onClear={() => setFilter(EMPTY_EVENT_FILTER)} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Fleet Safety Score"
           badge="PERIOD"
@@ -187,16 +187,6 @@ export default function DriverSafetyTab({ raw, loading }) {
           iconColorClass="text-rose-600"
           loading={loading}
           tooltip="Events rated high severity (e.g. peak g well above threshold, ABA full brake). These are the ones a safety manager reviews one by one."
-        />
-        <KpiCard
-          title="Eco Score"
-          badge="PERIOD"
-          value={kpis.eco === null ? "—" : kpis.eco.toFixed(1)}
-          icon={Leaf}
-          iconBgClass="bg-emerald-50"
-          iconColorClass="text-emerald-600"
-          loading={loading}
-          tooltip="Distance-weighted trip eco score (0–100): penalises idling, time outside the RPM green band, braking, overspeed; rewards cruise control. Directly linked to fuel spend."
         />
         <KpiCard
           title="ADAS Activations"
@@ -418,90 +408,6 @@ export default function DriverSafetyTab({ raw, loading }) {
           )}
         </ChartCard>
       </div>
-
-      <DataTable
-        title={`Safety Scorecard by ${GROUP_NOUN[groupBy]}`}
-        tooltip={`One row per ${groupBy}. Safety and eco are distance-weighted; Δ = change in safety vs the previous period. Events, high-severity share and top event follow the event filter. Coach-now % = share of the group's drivers (with the minimum distance above) whose safety is below 70; a percentage only, no names. Groups with fewer than ${MATRIX_MIN_TRUCKS} trucks are not rated.`}
-        loading={loading}
-        rows={groups.rows}
-        rowKey={(r) => r.id}
-        emptyMessage="No groups match the current filters."
-        searchPlaceholder={`Search ${groupBy}`}
-        searchText={(r) => r.label}
-        initialSort={{ key: "rate", dir: "desc" }}
-        csvName={`safety-scorecard-by-${groupBy}.csv`}
-        columns={[
-          { key: "label", label: GROUP_NOUN[groupBy], sortValue: (r) => r.label, csv: (r) => r.label, className: "font-medium text-slate-700", render: (r) => r.label },
-          {
-            key: "band",
-            label: "Band",
-            sortValue: (r) => (r.lowSample ? null : r.safety),
-            csv: (r) => (r.lowSample ? "Not rated" : r.band),
-            render: (r) =>
-              r.lowSample ? (
-                <Pill className="bg-slate-100 text-slate-500">Not rated</Pill>
-              ) : r.band ? (
-                <Pill className={r.band === "Coach now" ? "bg-rose-100 text-rose-700" : r.band === "Watch" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}>
-                  {r.band}
-                </Pill>
-              ) : (
-                "—"
-              ),
-          },
-          { key: "safety", label: "Safety", align: "right", sortValue: (r) => r.safety, csv: (r) => r.safety?.toFixed(1), render: (r) => (r.safety === null ? "—" : r.safety.toFixed(1)) },
-          {
-            key: "delta",
-            label: "Δ",
-            align: "right",
-            sortValue: (r) => r.safetyDelta,
-            csv: (r) => r.safetyDelta?.toFixed(1),
-            render: (r) =>
-              r.safetyDelta === null ? (
-                <span className="text-slate-300">—</span>
-              ) : (
-                <span className={r.safetyDelta >= 0.5 ? "text-emerald-600" : r.safetyDelta <= -0.5 ? "text-rose-600" : "text-slate-400"}>
-                  {r.safetyDelta > 0 ? "+" : ""}
-                  {r.safetyDelta.toFixed(1)}
-                </span>
-              ),
-          },
-          { key: "eco", label: "Eco", align: "right", sortValue: (r) => r.eco, csv: (r) => r.eco?.toFixed(1), render: (r) => (r.eco === null ? "—" : r.eco.toFixed(0)) },
-          { key: "km", label: "Distance", align: "right", sortValue: (r) => r.km, csv: (r) => Math.round(r.km), render: (r) => `${formatNumber(r.km)} km` },
-          { key: "trucks", label: "Trucks", align: "right", sortValue: (r) => r.trucks, csv: (r) => r.trucks, render: (r) => r.trucks },
-          { key: "drivers", label: "Drivers", align: "right", sortValue: (r) => r.drivers, csv: (r) => r.drivers, render: (r) => r.drivers },
-          {
-            key: "rate",
-            label: "Events / 1k km",
-            align: "right",
-            sortValue: (r) => r.eventsPer1000,
-            csv: (r) => r.eventsPer1000?.toFixed(2),
-            render: (r) => (r.eventsPer1000 === null ? "—" : r.eventsPer1000.toFixed(1)),
-          },
-          {
-            key: "high",
-            label: "High severity",
-            align: "right",
-            sortValue: (r) => r.highSeverityPct,
-            csv: (r) => r.highSeverityPct?.toFixed(1),
-            render: (r) => (r.highSeverityPct === null ? "—" : `${r.highSeverityPct.toFixed(0)}%`),
-          },
-          {
-            key: "top",
-            label: "Top Event",
-            sortValue: (r) => r.topEventType,
-            csv: (r) => EVENT_LABELS[r.topEventType] ?? r.topEventType,
-            render: (r) => <span className="text-xs">{r.topEventType ? EVENT_LABELS[r.topEventType] : "—"}</span>,
-          },
-          {
-            key: "coach",
-            label: "Coach now",
-            align: "right",
-            sortValue: (r) => r.coachNowPct,
-            csv: (r) => r.coachNowPct?.toFixed(1),
-            render: (r) => (r.coachNowPct === null ? "—" : `${r.coachNowPct.toFixed(0)}%`),
-          },
-        ]}
-      />
     </div>
   );
 }

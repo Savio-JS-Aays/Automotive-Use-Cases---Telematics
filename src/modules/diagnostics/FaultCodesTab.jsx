@@ -59,14 +59,13 @@ function ConditionTooltip({ active, payload }) {
 export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
   const navigate = useNavigate();
   const [faultScope, setFaultScope] = useState("period");
-  const [includeIntermittent, setIncludeIntermittent] = useState(false);
   const [cross, setCross] = useState(EMPTY_CROSS);
   const [panelCode, setPanelCode] = useState(null);
   const tableRef = useRef(null);
 
   const kpis = useMemo(() => faultKpis(raw), [raw]);
   const trend = useMemo(() => dtcRateTrend(raw), [raw]);
-  const faults = useMemo(() => topFaults(raw, { scope: faultScope, includeIntermittent }), [raw, faultScope, includeIntermittent]);
+  const faults = useMemo(() => topFaults(raw, { scope: faultScope }), [raw, faultScope]);
   const matrix = useMemo(() => systemModelMatrix(raw), [raw]);
   const funnel = useMemo(() => lifecycleFunnel(raw), [raw]);
   const conditions = useMemo(() => faultConditions(raw), [raw]);
@@ -177,15 +176,10 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
           className="xl:col-span-2"
           title="Most Common Faults"
           badge={faultScope === "active" ? "NOW" : "PERIOD"}
-          tooltip="Which faults hit the most trucks. Colour shows how serious: red = stop or power limited, amber = service soon, grey = self-healing glitches. Click a bar to see what the fault means, which trucks have it and which parts usually cause it."
+          tooltip="Which faults hit the most trucks. Colour shows how serious: red = stop or power limited, amber = service soon. Click a bar to see what the fault means, which trucks have it and which parts usually cause it."
           actions={
             <>
               <Segmented value={faultScope} onChange={setFaultScope} options={[{ value: "period", label: "Period" }, { value: "active", label: "Active now" }]} />
-              <Segmented
-                value={includeIntermittent ? "all" : "repair"}
-                onChange={(v) => setIncludeIntermittent(v === "all")}
-                options={[{ value: "repair", label: "Repairable" }, { value: "all", label: "+ Intermittent" }]}
-              />
             </>
           }
         >
@@ -218,7 +212,7 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
                           <p className="mt-1 text-slate-600">
                             {f.trucks} {f.trucks === 1 ? "truck" : "trucks"} · raised {f.count} {f.count === 1 ? "time" : "times"} · {f.active} active now
                           </p>
-                          <p className="text-slate-500">{f.glitch ? "Self-healing glitch: clears without a repair" : LAMP_MEANING[f.lamp] ?? f.lamp}</p>
+                          <p className="text-slate-500">{LAMP_MEANING[f.lamp] ?? f.lamp}</p>
                         </div>
                       );
                     }}

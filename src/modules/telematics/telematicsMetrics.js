@@ -9,9 +9,6 @@
 // Constants
 // ---------------------------------------------------------------------------
 export const DIESEL_PRICE_INR_PER_L = 90; // same constant the simulator uses
-export const ADBLUE_NORMAL_PCT = 5.5;
-export const ADBLUE_LOW_PCT = 3; // below this a diesel truck is flagged (DEF fault / tampering)
-export const ADBLUE_MIN_FUEL_L = 100; // min diesel volume before the ratio is rated
 export const ROLLING_DAYS = 7;
 export const MATRIX_MIN_TRUCKS = 5;
 export const MIN_PREV_COVERAGE = 0.8; // share of expected vehicle-days needed to show a delta
@@ -231,7 +228,6 @@ export function truckStats(raw) {
     else if (latest?.is_operating) status = "Active";
 
     const fuel = sum("fuel_l");
-    const adblue = sum("adblue_l");
     const bev = v.powertrain === "bev";
     return {
       vehicleId: v.vehicle_id,
@@ -255,7 +251,6 @@ export function truckStats(raw) {
       consumption: bev ? ratio(sum("energy_kwh"), km, 100) : ratio(fuel, km, 100),
       consumptionUnit: bev ? "kWh/100 km" : "L/100 km",
       idleCostInr: sum("idle_fuel_l") * DIESEL_PRICE_INR_PER_L,
-      adbluePct: !bev && fuel >= ADBLUE_MIN_FUEL_L ? ratio(adblue, fuel, 100) : null,
       safety: distanceWeighted(rows, "safety_score"),
       eco: distanceWeighted(rows, "eco_score"),
       harshEvents: sum("harsh_event_count"),
@@ -490,17 +485,12 @@ export function fuelKpis(raw) {
     let bevKwh = 0;
     let bevKm = 0;
     let idleFuel = 0;
-    let adblue = 0;
     let idleH = 0;
     let engineH = 0;
-    let co2 = 0;
-    let km = 0;
     for (const r of rows) {
       const bev = isBev(r);
-      km += num(r.distance_km);
       idleH += num(r.idle_hours);
       engineH += num(r.engine_hours);
-      co2 += num(r.co2_kg);
       if (bev) {
         bevKwh += num(r.energy_kwh);
         bevKm += num(r.distance_km);
@@ -508,7 +498,6 @@ export function fuelKpis(raw) {
         dieselFuel += num(r.fuel_l);
         dieselKm += num(r.distance_km);
         idleFuel += num(r.idle_fuel_l);
-        adblue += num(r.adblue_l);
       }
     }
     return {
@@ -517,9 +506,6 @@ export function fuelKpis(raw) {
       idleCost: idleFuel * DIESEL_PRICE_INR_PER_L,
       idleFuel,
       idlePct: ratio(idleH, engineH, 100),
-      co2T: co2 / 1000,
-      co2PerKm: ratio(co2, km),
-      adbluePct: ratio(adblue, dieselFuel, 100),
       dieselFuel,
     };
   };
@@ -530,7 +516,6 @@ export function fuelKpis(raw) {
 
   const trucks = raw.vehicles.length;
   const days = raw.period?.days ?? 0;
-  const lowAdblueTrucks = truckStats(raw).filter((t) => t.adbluePct !== null && t.adbluePct < ADBLUE_LOW_PCT).length;
 
   return {
     ...c,
@@ -538,10 +523,7 @@ export function fuelKpis(raw) {
     kwhPer100Delta: d("kwhPer100"),
     idleCostChangePct: pctChange("idleCost"),
     idlePctDelta: d("idlePct"),
-    co2ChangePct: pctChange("co2T"),
-    adbluePctDelta: d("adbluePct"),
     idleCostPerTruckMonth: trucks > 0 && days > 0 ? (c.idleCost / trucks / days) * 30 : null,
-    lowAdblueTrucks,
     hasDiesel: raw.vehicles.some((v) => v.powertrain !== "bev"),
     hasBev: raw.vehicles.some((v) => v.powertrain === "bev"),
   };
@@ -715,12 +697,8 @@ export function modelBenchmark(raw) {
         km: 0,
         fuel: 0,
         kwh: 0,
-        adblue: 0,
         idleH: 0,
         engineH: 0,
-        co2: 0,
-        ecoW: 0,
-        ecoKm: 0,
       });
     }
     return byModel.get(v.model_id);
@@ -733,18 +711,8 @@ export function modelBenchmark(raw) {
     m.km += num(r.distance_km);
     m.fuel += num(r.fuel_l);
     m.kwh += num(r.energy_kwh);
-    m.adblue += num(r.adblue_l);
     m.idleH += num(r.idle_hours);
     m.engineH += num(r.engine_hours);
-    m.co2 += num(r.co2_kg);
-  }
-  for (const t of raw.trips) {
-    const v = vIdx.get(t.vehicle_id);
-    if (!v || t.eco_score === null) continue;
-    const m = ensure(v);
-    const km = num(t.distance_km);
-    m.ecoW += Number(t.eco_score) * km;
-    m.ecoKm += km;
   }
   const modelRef = new Map(raw.models.map((m) => [m.model_id, m]));
   return [...byModel.values()]
@@ -764,9 +732,6 @@ export function modelBenchmark(raw) {
         rated,
         gapPct: actual !== null && rated ? ((actual - rated) / rated) * 100 : null,
         idlePct: ratio(m.idleH, m.engineH, 100),
-        adbluePct: bev ? null : ratio(m.adblue, m.fuel, 100),
-        co2PerKm: bev ? 0 : ratio(m.co2, m.km),
-        eco: m.ecoKm > 0 ? m.ecoW / m.ecoKm : null,
       };
     });
 }
@@ -798,12 +763,8 @@ export function evStats(raw, minKm) {
   const publicKwh = byType.get("PUBLIC_DC")?.kwh ?? 0;
 
   const tempPoints = [];
-  let regen = 0;
-  let used = 0;
   for (const t of raw.trips) {
     if (vIdx.get(t.vehicle_id)?.powertrain !== "bev") continue;
-    regen += num(t.regen_kwh);
-    used += num(t.energy_used_kwh);
     const km = num(t.distance_km);
     if (km < minKm || t.energy_used_kwh === null || t.ambient_temp_c === null) continue;
     tempPoints.push({
@@ -818,10 +779,7 @@ export function evStats(raw, minKm) {
     sessions: raw.charging.length,
     kwh,
     cost,
-    perKwh: kwh > 0 ? cost / kwh : null,
     publicSharePct: kwh > 0 ? (publicKwh / kwh) * 100 : null,
-    // energy_used_kwh is net of regen, so regen share = regen / (net + regen)
-    regenSharePct: used + regen > 0 ? (regen / (used + regen)) * 100 : null,
     chargerMix,
     tempPoints: stride > 1 ? tempPoints.filter((_, i) => i % stride === 0) : tempPoints,
   };

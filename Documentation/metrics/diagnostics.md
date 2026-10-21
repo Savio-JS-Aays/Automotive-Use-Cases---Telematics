@@ -9,7 +9,7 @@
 >   - UI in `modules/diagnostics/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01. The planned standalone DTC
 >   Analysis module is merged into the Fault Codes tab (see [dtc-analysis.md](dtc-analysis.md)).
-> - Last updated: 2026-10-09
+> - Last updated: 2026-10-21
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags in `FaultCodesTab.jsx` / `SignalHealthTab.jsx`; their formulas
@@ -54,7 +54,7 @@ below remain valid and the KPI cards still show.
 - **Active DTC:** `fact_dtc_event.status = 'active'`.
 - **Intermittent DTC:** `status = 'previously_active'`, a code that self-healed.
   - It is excluded from the repair KPIs, the rate, the funnel and the lead time.
-  - Most Common Faults can include it ("+ Intermittent").
+  - Most Common Faults also leaves it out (the "+ Intermittent" toggle was removed 2026-10-21).
 - **New DTC in the period:** `date_id` (first-seen date) lies in the period.
 - **Band state of a value v** against `dim_signal`, taking `direction` into account:
 
@@ -103,11 +103,10 @@ below remain valid and the KPI cards still show.
   - **Colour:** by the code's `default_lamp`.
     - Red: RSL or PL, meaning stop or power limited.
     - Amber: AWL or MIL, meaning service soon.
-    - Grey: codes whose occurrences all self-healed, shown only with "+ Intermittent".
   - **Takeaway line above the bars:** "{top fault} is the most widespread fault: N of M trucks
     with a fault." M = distinct trucks with any fault in scope.
   - **Footnote:** "Showing the top 10 of K faults · M trucks had at least one."
-  - Scope toggle: Period / Active now. Repairable / + Intermittent toggle.
+  - Scope toggle: Period / Active now.
   - Clicking a bar opens the code drawer, titled with the plain name.
 - **Faults by System × Model.** Heatmap.
   - cell = new non-intermittent DTCs of (model, `dim_dtc.system`) ÷ the model's trucks in scope ×
@@ -219,8 +218,7 @@ below remain valid and the KPI cards still show.
 
 | KPI | Formula |
 |---|---|
-| Worst-Part Risk | max `failure_probability` over the latest prediction per `part_id` (weekly or alert) |
-| Min RUL | min `rul_km` (and min `rul_days`) over the same latest predictions |
+| Min RUL | min `rul_km` (and min `rul_days`) over the latest prediction per `part_id` (weekly or alert) |
 | Active Faults | `count(status = 'active')`, by lamp |
 | Signals Out of Band | latest raw reading per signal whose state is not normal ÷ signals with a band |
 | Odometer | latest `odometer_km_end` |

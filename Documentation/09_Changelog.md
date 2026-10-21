@@ -3,7 +3,39 @@
 > Dated record of feature, data-model and documentation changes. Add an entry for every
 > change, newest first.
 >
-> Last updated: 2026-10-09
+> Last updated: 2026-10-21
+
+## 2026-10-21 — KPI card deltas and sparklines removed
+- **All modules:** the green / red change-vs-previous-period line and the trend sparkline are no longer rendered on any KPI card. A card now shows title, badge, value and the hover tooltip only. Change is in the shared `KpiCard` component; the `delta`, `sparkline` and `subtitle` props passed by pages are ignored.
+
+## 2026-10-21 — KPI card subtitles removed everywhere
+- **All modules:** the grey line under the value on every KPI card (for example "per 100 km", "3 red · 2 amber", the part name under a risk) is no longer rendered. The change is in the shared `KpiCard` component, so it applies to Overview, Telematics, Vehicle Diagnostics, Component Reliability, Supply Chain and Financial & Warranty at once. The change-vs-previous-period line and the sparkline are removed too (see the next entry up). The `subtitle` props passed by each page are now ignored; they are documented in the metrics files as card detail that the tooltip explains.
+
+## 2026-10-21 — Supplier risk tier removed
+- **Component Reliability → Supplier & Build Quality:** the Risk Tier Check chart is removed. The Supplier Scorecard now uses a single bar colour, drops the High / Medium / Low risk legend and tooltip wording, and spans the full width. `dim_supplier.risk_tier` is no longer fetched by the dashboard (the column stays in the database; the "Validation against the simulator" rows for risk-tier suppliers are historical).
+
+## 2026-10-21 — Failure Modes chart removed
+- **Component Reliability → Part View:** the Failure Modes bar chart is removed; Hazard Rate by km and Precursor Signature now share the row. The failure mode remains a column in the Replacements table and still feeds the Root Cause tab.
+
+## 2026-10-21 — Worst-Part Risk card and intermittent toggle removed
+- **Vehicle Diagnostics → Asset View:** the Worst-Part Risk KPI card is removed (five cards remain). The risk band pill in the header still uses the same highest-probability calculation.
+- **Vehicle Diagnostics → Fault Codes:** the Repairable / + Intermittent toggle on Most Common Faults is removed. The chart always excludes intermittent (self-healed) codes, so the grey "self-healing glitch" bar colour and legend entry are gone too.
+
+## 2026-10-21 — Driver Safety and Asset View trimmed
+- **Telematics → Driver Safety:** the Eco Score KPI card and the Safety Scorecard by Model / Application / Region table are removed. The Group by toggle still drives the Safety Risk chart; the Coaching Quadrant still uses eco.
+- **Telematics → Asset View:** the Eco Score KPI card (row is now five cards) and the Harsh & ADAS Event Log table are removed. Harsh events still appear as dots on the Day Trace, and the Trip Log keeps its events column.
+
+## 2026-10-21 — Blended cost, AdBlue %, CO₂ / 100 km and Eco Score removed
+- **Telematics → Fuel, Energy & CO₂:** the Blended cost tile (battery-electric section) and the AdBlue %, CO₂ / 100 km and Eco Score columns of the Model Efficiency Benchmark table are removed. The AdBlue ratio, its thresholds and the per-model CO₂ and eco calculations are deleted from `telematicsMetrics.js`. `adblue_l`, `co2_kg` and `eco_score` are still stored in the database.
+
+## 2026-10-21 — AdBlue : Diesel KPI removed
+- **Telematics → Fuel, Energy & CO₂:** the AdBlue : Diesel card is removed; the KPI row is now three cards (two when no diesel truck is in scope). The per-model "AdBlue %" column in the table is unchanged.
+
+## 2026-10-21 — Regen share tile removed
+- **Telematics → Fuel, Energy & CO₂ → Battery-electric fleet:** the Regen share tile is removed; five tiles remain. `regen_kwh` is still stored on `fact_trip`.
+
+## 2026-10-21 — CO₂ Emitted KPI removed
+- **Telematics → Fuel, Energy & CO₂:** the CO₂ Emitted card is removed; the KPI row is now four cards (two when no diesel truck is in scope). CO₂ per 100 km is still shown in the model table.
 
 ## 2026-10-09 — Beta and Eta columns removed from Component Variance Master
 - **Component Reliability → Field Life:** the Beta (β) and Eta (η) columns are removed from the table. The Weibull fit is still computed and still drives the failure-pattern map, the extrapolated B10 flag and the hazard status.

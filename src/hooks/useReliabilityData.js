@@ -105,7 +105,7 @@ export function useReliabilityData() {
         const [replacements, parts, suppliers, odometer, repairOrders, dtcEvents, bridge, precursor] = await Promise.all([
           fetchAllRows("fact_part_replacement", REPLACEMENT_COLUMNS, (q) => q.in("vehicle_id", ids).order("replacement_id")),
           fetchAllRows("dim_part", "part_id, part_name, part_type, vehicle_subsystem, b10_design_life_miles, unit_cost", (q) => q.order("part_id")),
-          fetchAllRows("dim_supplier", "supplier_id, supplier_name, risk_tier", (q) => q.order("supplier_id")),
+          fetchAllRows("dim_supplier", "supplier_id, supplier_name", (q) => q.order("supplier_id")),
           latestDate
             ? fetchAllRows("fact_vehicle_daily", "vehicle_id, date_id, odometer_km_end", (q) => q.in("vehicle_id", ids).eq("date_id", latestDate).order("vehicle_id"))
             : Promise.resolve([]),

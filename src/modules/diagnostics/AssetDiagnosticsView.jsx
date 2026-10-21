@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, parseISO } from "date-fns";
-import { AlertOctagon, ArrowLeft, ClipboardCopy, Gauge, Radio, ShieldAlert, SlidersHorizontal, Timer, Truck, Wrench, X } from "lucide-react";
+import { AlertOctagon, ArrowLeft, ClipboardCopy, Gauge, Radio, SlidersHorizontal, Timer, Truck, Wrench, X } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -257,18 +257,7 @@ export default function AssetDiagnosticsView({ vehicleId }) {
 
       {error && <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Couldn't load diagnostics for this truck: {error.message}</div>}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <KpiCard
-          title="Worst-Part Risk"
-          badge="NOW"
-          value={summary.worst ? formatPct(summary.worst.failure_probability * 100, 0) : "—"}
-          subtitle={summary.worst?.dim_part?.part_name}
-          icon={ShieldAlert}
-          iconBgClass="bg-rose-50"
-          iconColorClass="text-rose-600"
-          loading={loading}
-          tooltip="Highest 30-day failure probability across this truck's monitored parts (latest weekly or alert prediction)."
-        />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           title="Min RUL"
           badge="NOW"

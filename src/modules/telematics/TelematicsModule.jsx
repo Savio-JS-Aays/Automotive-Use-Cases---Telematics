@@ -13,7 +13,7 @@ import AssetTelematicsView from "./AssetTelematicsView";
 
 const TABS = [
   { id: "utilization", label: "Utilization & Uptime", icon: Activity, component: UtilizationTab },
-  { id: "fuel", label: "Fuel, Energy & CO₂", icon: Fuel, component: FuelEnergyTab },
+  { id: "fuel", label: "Fuel & Energy", icon: Fuel, component: FuelEnergyTab },
   { id: "safety", label: "Driver Safety", icon: ShieldCheck, component: DriverSafetyTab },
   { id: "data", label: "Data Health", icon: Radio, component: DataHealthTab },
 ];

@@ -217,7 +217,6 @@ export function faultName(e) {
 export const FAULT_TONES = {
   stop: { color: "#e11d48", label: "Stop or power limited" },
   soon: { color: "#f59e0b", label: "Service soon" },
-  glitch: { color: "#cbd5e1", label: "Self-healing glitch" },
 };
 export const LAMP_MEANING = {
   RSL: "Red stop lamp: stop safely",
@@ -342,11 +341,11 @@ export function dtcRateTrend(raw) {
 
 /**
  * Most common faults: distinct trucks that had each code. scope: "period" (first seen in the
- * period) or "active" (active now). Intermittent codes are left out unless asked for.
+ * period) or "active" (active now). Intermittent codes are always left out.
  */
-export function topFaults(raw, { scope, includeIntermittent }) {
+export function topFaults(raw, { scope }) {
   const events = raw.dtcEvents.filter((e) => {
-    if (!includeIntermittent && isIntermittent(e)) return false;
+    if (isIntermittent(e)) return false;
     return scope === "active" ? e.status === "active" : inCurrent(raw.period, e.date_id);
   });
   const byCode = new Map();
@@ -363,19 +362,14 @@ export function topFaults(raw, { scope, includeIntermittent }) {
       count: 0,
       active: 0,
       trucks: new Set(),
-      intermittent: 0,
     };
     g.count += 1;
     if (e.status === "active") g.active += 1;
     g.trucks.add(e.vehicle_id);
-    if (isIntermittent(e)) g.intermittent += 1;
     byCode.set(e.dtc_id, g);
   }
   const all = [...byCode.values()]
-    .map((g) => {
-      const glitch = g.intermittent === g.count;
-      return { ...g, trucks: g.trucks.size, glitch, tone: glitch ? "glitch" : faultTone(g.lamp) };
-    })
+    .map((g) => ({ ...g, trucks: g.trucks.size, tone: faultTone(g.lamp) }))
     .sort((a, b) => b.trucks - a.trucks || b.count - a.count);
   return { rows: all.slice(0, TOP_FAULTS), codes: all.length, fleetTrucks: fleet.size, total: events.length };
 }

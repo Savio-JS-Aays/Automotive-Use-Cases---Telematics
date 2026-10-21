@@ -1,10 +1,10 @@
 import React, { useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import { ArrowLeft, Clock, Gauge, IndianRupee, ShieldCheck, Sigma, Target } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import { usePartPrecursor } from "../../hooks/useReliabilityData";
-import { GROUP_PALETTE, HAZARD_STYLES, formatKm, modeCounts, partFailureRows, precursorSignature, weibullPlot } from "./reliabilityMetrics";
+import { GROUP_PALETTE, HAZARD_STYLES, formatKm, partFailureRows, precursorSignature, weibullPlot } from "./reliabilityMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatInr, formatNumber, formatPct } from "../telematics/telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill } from "../telematics/TelematicsUi";
 import { HazardChart, WeibullPlot } from "./ReliabilityCharts";
@@ -23,7 +23,6 @@ export default function PartView({ partId, raw, lt, summaries, loading, onBack, 
   const summary = summaries.find((s) => s.partId === partId);
   const part = lt.partsById.get(partId);
   const weibull = useMemo(() => weibullPlot(lt, partId), [lt, partId]);
-  const modes = useMemo(() => modeCounts(lt, partId), [lt, partId]);
   const failures = useMemo(() => partFailureRows(lt, partId), [lt, partId]);
   const vehicleIds = useMemo(() => raw.vehicles.map((v) => v.vehicle_id), [raw.vehicles]);
   const precursor = usePartPrecursor(partId, vehicleIds);
@@ -142,25 +141,7 @@ export default function PartView({ partId, raw, lt, summaries, loading, onBack, 
         </ChartCard>
       )}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <ChartCard title="Failure Modes" tooltip="How this part failed, from the workshop's failure-mode code.">
-          {loading ? (
-            <ChartSkeleton />
-          ) : modes.length === 0 ? (
-            <EmptyChart message="No failures." />
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart layout="vertical" data={modes} margin={{ left: 8, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="mode" width={120} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip formatter={(v) => [v, "Failures"]} />
-                <Bar dataKey="count" fill="#0ea5e9" radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard title="Hazard Rate by km" tooltip="Failures per 1,000 parts at risk in each 50,000 km band of part life. Rising = wear-out (an interval replacement can pay off); falling = early-life quality problem.">
           {loading ? <ChartSkeleton /> : <HazardChart lt={lt} partId={partId} />}
         </ChartCard>

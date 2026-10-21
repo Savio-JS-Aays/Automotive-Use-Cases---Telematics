@@ -32,7 +32,6 @@ export const HAZARD_STYLES = {
   "Insufficient Data": "bg-slate-100 text-slate-500",
 };
 export const HAZARD_COLORS = { Critical: "#e11d48", Watch: "#f59e0b", "On Spec": "#10b981", "Insufficient Data": "#94a3b8" };
-export const RISK_TIER_COLORS = { High: "#e11d48", Medium: "#f59e0b", Low: "#10b981" };
 export const GROUP_PALETTE = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#10b981", "#e11d48", "#64748b"];
 export const CLEAR_CAUSE_SHARE = 40; // one failure mode at or above this % of a part's failures is a clear corrective-action target
 export const MAIN_CAUSE_PARTS = 10;
@@ -338,7 +337,6 @@ export function partSummaries(lt) {
       return {
         supplierId,
         supplierName: s?.supplier_name ?? supplierId,
-        riskTier: s?.risk_tier ?? null,
         ...analyze(itemsFor(lt, partId, { type: "supplier", id: supplierId }), designKm),
       };
     });
@@ -512,7 +510,6 @@ export function supplierScorecard(summaries, limit = 15) {
         label: `${p.partName} · ${s.supplierName}`,
         partName: p.partName,
         supplierName: s.supplierName,
-        riskTier: s.riskTier,
         pctOfDesign: (s.fieldB10 / p.designKm) * 100,
         fieldB10: s.fieldB10,
         extrapolated: s.extrapolated,
@@ -522,33 +519,6 @@ export function supplierScorecard(summaries, limit = 15) {
     }
   }
   return rows.sort((a, b) => a.pctOfDesign - b.pctOfDesign).slice(0, limit);
-}
-
-/**
- * Supplier risk tier summary: median field B10 as % of design across the tier's
- * part × supplier groups with at least 5 failures (same groups as the scorecard).
- */
-export function riskTierSummary(summaries) {
-  const tiers = new Map();
-  for (const p of summaries) {
-    if (!p.designKm) continue;
-    for (const s of p.suppliers) {
-      if (s.failures < MIN_GROUP_FAILURES || s.fieldB10 === null || !s.riskTier) continue;
-      const t = tiers.get(s.riskTier) ?? { tier: s.riskTier, pcts: [], failures: 0 };
-      t.pcts.push((s.fieldB10 / p.designKm) * 100);
-      t.failures += s.failures;
-      tiers.set(s.riskTier, t);
-    }
-  }
-  return ["High", "Medium", "Low"]
-    .filter((tier) => tiers.has(tier))
-    .map((tier) => {
-      const t = tiers.get(tier);
-      const sorted = [...t.pcts].sort((x, y) => x - y);
-      const mid = sorted.length / 2;
-      const median = sorted.length % 2 ? sorted[Math.floor(mid)] : (sorted[mid - 1] + sorted[mid]) / 2;
-      return { tier, median: Number(median.toFixed(1)), groups: sorted.length, failures: t.failures, color: RISK_TIER_COLORS[tier] };
-    });
 }
 
 /** Build-quarter × age-at-failure matrix: failures per 100 trucks of the cohort that reached that age. */
@@ -801,10 +771,4 @@ export function partFailureRows(lt, partId) {
     .filter((f) => f.partId === partId)
     .map((f) => ({ ...f, supplierName: lt.suppliersById.get(f.supplierId)?.supplier_name ?? f.supplierId, modelLabel: lt.vehicles.get(f.vehicleId)?.model_label }))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
-}
-
-export function modeCounts(lt, partId) {
-  const counts = new Map();
-  for (const f of lt.failures) if (f.partId === partId) counts.set(f.mode ?? "Unknown", (counts.get(f.mode ?? "Unknown") ?? 0) + 1);
-  return [...counts.entries()].map(([mode, count]) => ({ mode, count })).sort((a, b) => b.count - a.count);
 }

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { BatteryCharging, Droplets, Fuel, Leaf, Timer } from "lucide-react";
+import { BatteryCharging, Fuel, Timer } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -18,8 +18,6 @@ import {
 } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import {
-  ADBLUE_LOW_PCT,
-  ADBLUE_NORMAL_PCT,
   DIESEL_PRICE_INR_PER_L,
   consumptionTrend,
   consumptionVsLoad,
@@ -85,7 +83,7 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
 
   return (
     <div className="space-y-4">
-      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${kpis.hasDiesel ? "xl:grid-cols-5" : "xl:grid-cols-3"}`}>
+      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${kpis.hasDiesel ? "xl:grid-cols-3" : "xl:grid-cols-2"}`}>
         <KpiCard
           title={kpis.hasDiesel ? "Fuel Economy" : "Energy Economy"}
           badge="PERIOD"
@@ -132,32 +130,6 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
           loading={loading}
           tooltip="Σ idle hours ÷ Σ engine-on hours. Above ~20% usually means drivers keep the engine running while loading or waiting."
         />
-        <KpiCard
-          title="CO₂ Emitted"
-          badge="PERIOD"
-          value={`${formatNumber(kpis.co2T, 1)} t`}
-          subtitle={kpis.co2PerKm !== null ? `${(kpis.co2PerKm * 100).toFixed(0)} kg per 100 km` : undefined}
-          delta={kpis.co2ChangePct !== null ? { value: kpis.co2ChangePct, unit: "%", positiveIsGood: false } : null}
-          icon={Leaf}
-          iconBgClass="bg-emerald-50"
-          iconColorClass="text-emerald-600"
-          loading={loading}
-          tooltip="Tailpipe CO₂ = diesel litres × 2.68 kg. BEVs count as zero. Needed for customers' ESG reporting and for the OEM's fleet-average CO₂ targets."
-        />
-        {kpis.hasDiesel && (
-        <KpiCard
-          title="AdBlue : Diesel"
-          badge="PERIOD"
-          value={formatPct(kpis.adbluePct, 2)}
-          subtitle={`normal ≈ ${ADBLUE_NORMAL_PCT}% · ${kpis.lowAdblueTrucks} trucks < ${ADBLUE_LOW_PCT}%`}
-          delta={kpis.adbluePctDelta !== null ? { value: kpis.adbluePctDelta, unit: " pp" } : null}
-          icon={Droplets}
-          iconBgClass="bg-violet-50"
-          iconColorClass="text-violet-600"
-          loading={loading}
-          tooltip="AdBlue (DEF) litres ÷ diesel litres. A healthy SCR system doses ~5.5%. A low ratio on a truck points at a DEF dosing fault or emissions tampering: a compliance and warranty risk for the OEM."
-        />
-        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -323,10 +295,8 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
               {[
                 { label: "Charging sessions", value: formatNumber(ev.sessions) },
                 { label: "Energy charged", value: `${formatNumber(ev.kwh / 1000, 1)} MWh` },
-                { label: "Blended cost", value: ev.perKwh !== null ? `₹${ev.perKwh.toFixed(1)}/kWh` : "—" },
                 { label: "Public charging share", value: formatPct(ev.publicSharePct) },
                 { label: "Charging spend", value: formatInr(ev.cost) },
-                { label: "Regen share", value: formatPct(ev.regenSharePct) },
               ].map((s) => (
                 <div key={s.label} className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
                   <div className="text-[11px] uppercase tracking-wider text-slate-400">{s.label}</div>
@@ -429,16 +399,6 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
               r.gapPct === null ? "—" : <span className={r.gapPct > 5 ? "font-semibold text-rose-600" : r.gapPct < -5 ? "text-emerald-600" : ""}>{`${r.gapPct > 0 ? "+" : ""}${r.gapPct.toFixed(1)}%`}</span>,
           },
           { key: "idle", label: "Idle %", align: "right", sortValue: (r) => r.idlePct, csv: (r) => r.idlePct?.toFixed(1), render: (r) => formatPct(r.idlePct) },
-          {
-            key: "adblue",
-            label: "AdBlue %",
-            align: "right",
-            sortValue: (r) => r.adbluePct,
-            csv: (r) => r.adbluePct?.toFixed(2),
-            render: (r) => (r.adbluePct === null ? "—" : <span className={r.adbluePct < ADBLUE_LOW_PCT ? "text-rose-600" : ""}>{formatPct(r.adbluePct, 2)}</span>),
-          },
-          { key: "co2", label: "CO₂ / 100 km", align: "right", sortValue: (r) => r.co2PerKm, csv: (r) => r.co2PerKm?.toFixed(3), render: (r) => (r.co2PerKm === null ? "—" : `${(r.co2PerKm * 100).toFixed(0)} kg`) },
-          { key: "eco", label: "Eco Score", align: "right", sortValue: (r) => r.eco, csv: (r) => r.eco?.toFixed(1), render: (r) => (r.eco === null ? "—" : r.eco.toFixed(0)) },
         ]}
       />
     </div>

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, Fuel, Gauge, Leaf, MapPin, Route, ShieldCheck, Stethoscope, Timer, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Fuel, Gauge, Route, ShieldCheck, Stethoscope, Timer, X } from "lucide-react";
 import {
   Bar,
   CartesianGrid,
@@ -17,13 +17,12 @@ import {
 import KpiCard from "../../components/kpi/KpiCard";
 import { useTelematicsAssetData, useVehicleDayTrace } from "../../hooks/useTelematicsData";
 import { useFilterStore } from "../../store/useFilterStore";
-import { EVENT_LABELS, OVERSPEED_LIMIT_KMH, assetDailyTrend, assetKpis, assetTrips, speedTrace } from "./telematicsMetrics";
+import { OVERSPEED_LIMIT_KMH, assetDailyTrend, assetKpis, assetTrips, speedTrace } from "./telematicsMetrics";
 import {
   AXIS_LINE,
   AXIS_TICK,
   GRID_STROKE,
   LEGEND_STYLE,
-  SEVERITY_STYLES,
   formatClock,
   formatDateTime,
   formatDay,
@@ -72,21 +71,13 @@ export default function AssetTelematicsView({ vehicleId }) {
   const trace = useMemo(() => speedTrace(dayTrace.trace, tripId), [dayTrace.trace, tripId]);
   const domain = trace.points.length ? [trace.points[0].t, trace.points[trace.points.length - 1].t] : [0, 0];
 
-  const events = useMemo(
-    () =>
-      [...raw.events]
-        .filter((e) => !tripId || e.trip_id === tripId)
-        .sort((a, b) => (a.ts < b.ts ? 1 : -1)),
-    [raw.events, tripId]
-  );
-
   const selectTrip = (trip) => {
     if (tripId === trip.tripId) {
       setTripId(null);
       return;
     }
     if (!raw.traceDays.includes(trip.dateId)) {
-      setNotice(`Trip ${trip.tripId} is on ${formatDay(trip.dateId)}. 5-minute traces are kept for the last 7 days only; the event log is filtered to it.`);
+      setNotice(`Trip ${trip.tripId} is on ${formatDay(trip.dateId)}. 5-minute traces are kept for the last 7 days only, so no trace is available for it.`);
       setTripId(trip.tripId);
       return;
     }
@@ -143,7 +134,7 @@ export default function AssetTelematicsView({ vehicleId }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           title="Safety Score"
           badge="PERIOD"
@@ -154,16 +145,6 @@ export default function AssetTelematicsView({ vehicleId }) {
           iconColorClass="text-emerald-600"
           loading={loading}
           tooltip="Distance-weighted daily safety score for this truck over the period (all drivers who drove it)."
-        />
-        <KpiCard
-          title="Eco Score"
-          badge="PERIOD"
-          value={kpis.eco === null ? "—" : kpis.eco.toFixed(1)}
-          icon={Leaf}
-          iconBgClass="bg-emerald-50"
-          iconColorClass="text-emerald-600"
-          loading={loading}
-          tooltip="Distance-weighted daily eco score: idling, RPM green band, braking, overspeed and cruise use."
         />
         <KpiCard
           title="Distance"
@@ -345,60 +326,6 @@ export default function AssetTelematicsView({ vehicleId }) {
             render: (r) => <span className={r.events > 0 ? "font-semibold text-rose-600" : ""}>{r.events}</span>,
           },
           { key: "eco", label: "Eco", align: "right", sortValue: (r) => r.eco, csv: (r) => r.eco, render: (r) => (r.eco === null ? "—" : Number(r.eco).toFixed(0)) },
-        ]}
-      />
-
-      <DataTable
-        title="Harsh & ADAS Event Log"
-        tooltip="Every event in the period (or in the selected trip) with speed before → after, peak g and GPS position. Use it to review a specific incident with the driver."
-        loading={loading}
-        rows={events}
-        rowKey={(r) => r.event_id}
-        emptyMessage="No events recorded."
-        csvName={`${vehicleId}-events.csv`}
-        maxHeight="max-h-96"
-        columns={[
-          { key: "ts", label: "Time", sortValue: (r) => r.ts, csv: (r) => r.ts, render: (r) => <span className="whitespace-nowrap text-xs">{formatDateTime(r.ts)}</span> },
-          {
-            key: "type",
-            label: "Event",
-            sortValue: (r) => r.event_type,
-            csv: (r) => EVENT_LABELS[r.event_type] ?? r.event_type,
-            className: "font-medium text-slate-700",
-            render: (r) => EVENT_LABELS[r.event_type] ?? r.event_type,
-          },
-          { key: "sev", label: "Severity", sortValue: (r) => r.severity, csv: (r) => r.severity, render: (r) => <Pill className={SEVERITY_STYLES[r.severity] ?? SEVERITY_STYLES.low}>{r.severity}</Pill> },
-          {
-            key: "speed",
-            label: "Speed",
-            align: "right",
-            sortValue: (r) => r.speed_before_kmh,
-            csv: (r) => `${r.speed_before_kmh ?? ""}->${r.speed_after_kmh ?? ""}`,
-            render: (r) =>
-              r.speed_before_kmh === null ? "—" : <span className="whitespace-nowrap text-xs">{`${Math.round(r.speed_before_kmh)} → ${Math.round(r.speed_after_kmh ?? 0)} km/h`}</span>,
-          },
-          { key: "g", label: "Peak g", align: "right", sortValue: (r) => r.peak_g, csv: (r) => r.peak_g, render: (r) => (r.peak_g === null ? "—" : Number(r.peak_g).toFixed(2)) },
-          { key: "src", label: "Source", sortValue: (r) => r.source, csv: (r) => r.source, render: (r) => <span className="text-xs">{r.source ?? "—"}</span> },
-          {
-            key: "pos",
-            label: "Position",
-            csv: (r) => (r.lat === null ? "" : `${r.lat},${r.lon}`),
-            render: (r) =>
-              r.lat === null ? (
-                "—"
-              ) : (
-                <a
-                  href={`https://www.openstreetmap.org/?mlat=${r.lat}&mlon=${r.lon}#map=14/${r.lat}/${r.lon}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-sky-600 hover:underline"
-                >
-                  <MapPin className="h-3 w-3" />
-                  {Number(r.lat).toFixed(4)}, {Number(r.lon).toFixed(4)}
-                </a>
-              ),
-          },
         ]}
       />
 

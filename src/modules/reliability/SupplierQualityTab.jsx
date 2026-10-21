@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
-import { RISK_TIER_COLORS, cohortMatrix, formatKm, riskTierSummary, supplierScorecard, whereFails } from "./reliabilityMetrics";
+import { Bar, BarChart, CartesianGrid, LabelList, ReferenceLine, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
+import { cohortMatrix, formatKm, supplierScorecard, whereFails } from "./reliabilityMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, formatNumber, truncateString } from "../telematics/telematicsFormat";
 import { ChartCard, ChartSkeleton, EmptyChart, HeatGrid, Segmented, SingleLineTick } from "../telematics/TelematicsUi";
 
@@ -10,34 +10,18 @@ const WHERE_DIMS = [
   { value: "model", label: "Model" },
 ];
 
-function TierLegend() {
-  return (
-    <div className="flex items-center gap-3 text-[11px] text-slate-500">
-      {Object.entries(RISK_TIER_COLORS).map(([tier, color]) => (
-        <span key={tier} className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-          {tier} risk
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export default function SupplierQualityTab({ raw, lt, summaries, loading, onOpenPart }) {
   const [dim, setDim] = useState("application");
   const scorecard = useMemo(() => supplierScorecard(summaries), [summaries]);
-  const tiers = useMemo(() => riskTierSummary(summaries), [summaries]);
   const cohorts = useMemo(() => cohortMatrix(lt, raw.latestDate), [lt, raw.latestDate]);
   const where = useMemo(() => whereFails(lt, summaries, dim), [lt, summaries, dim]);
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4">
         <ChartCard
-          className="xl:col-span-2"
           title="Supplier Scorecard: Field B10 as % of Design"
-          tooltip="Field B10 life of each part × supplier combination (at least 5 failures) as a share of the design B10; the 15 worst are shown. Below 100 % = the supplier's parts reach 10 % failures earlier than engineering specified. Colour = supplier risk tier. Click a bar for the Part View."
-          actions={<TierLegend />}
+          tooltip="Field B10 life of each part × supplier combination (at least 5 failures) as a share of the design B10; the 15 worst are shown. Below 100 % = the supplier's parts reach 10 % failures earlier than engineering specified. Click a bar for the Part View."
         >
           {loading ? (
             <ChartSkeleton height="h-96" />
@@ -53,13 +37,10 @@ export default function SupplierQualityTab({ raw, lt, summaries, loading, onOpen
                 <RechartsTooltip
                   formatter={(v, _n, item) => {
                     const r = item.payload;
-                    return [`${Number(v).toFixed(0)}% (${formatKm(r.fieldB10)}${r.extrapolated ? ", extrapolated" : ""} · ${r.failures} failures · ${r.riskTier ?? "?"} risk)`, "B10 vs design"];
+                    return [`${Number(v).toFixed(0)}% (${formatKm(r.fieldB10)}${r.extrapolated ? ", extrapolated" : ""} · ${r.failures} failures)`, "B10 vs design"];
                   }}
                 />
-                <Bar dataKey="pctOfDesign" radius={[0, 3, 3, 0]} onClick={(d) => onOpenPart(d.partId ?? d.payload?.partId)} className="cursor-pointer">
-                  {scorecard.map((r) => (
-                    <Cell key={r.key} fill={RISK_TIER_COLORS[r.riskTier] ?? "#94a3b8"} />
-                  ))}
+                <Bar dataKey="pctOfDesign" fill="#0ea5e9" radius={[0, 3, 3, 0]} onClick={(d) => onOpenPart(d.partId ?? d.payload?.partId)} className="cursor-pointer">
                   <LabelList dataKey="failures" position="right" formatter={(v) => `n=${v}`} style={{ fontSize: 10, fill: "#94a3b8" }} />
                 </Bar>
               </BarChart>
@@ -67,32 +48,6 @@ export default function SupplierQualityTab({ raw, lt, summaries, loading, onOpen
           )}
         </ChartCard>
 
-        <ChartCard
-          title="Risk Tier Check"
-          tooltip="Median field B10 (% of design) across each supplier risk tier's part × supplier groups with at least 5 failures. If the High-risk tier is not clearly worse, the procurement risk rating does not match field behaviour."
-        >
-          {loading ? (
-            <ChartSkeleton />
-          ) : tiers.length === 0 ? (
-            <EmptyChart message="Not enough rated groups." />
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={tiers} margin={{ top: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                <XAxis dataKey="tier" tickFormatter={(t) => `${t} risk`} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis domain={[0, 110]} unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={44} />
-                <ReferenceLine y={100} stroke="#10b981" strokeDasharray="4 3" />
-                <RechartsTooltip formatter={(v, _n, item) => [`${v}% (${item.payload.groups} groups, ${item.payload.failures} failures)`, "Median B10 vs design"]} />
-                <Bar dataKey="median" radius={[3, 3, 0, 0]}>
-                  {tiers.map((t) => (
-                    <Cell key={t.tier} fill={t.color} />
-                  ))}
-                  <LabelList dataKey="groups" position="top" formatter={(v) => `${v} groups`} style={{ fontSize: 10, fill: "#94a3b8" }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
       </div>
 
       <ChartCard
