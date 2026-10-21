@@ -5,6 +5,13 @@
 >
 > Last updated: 2026-10-21
 
+## 2026-10-21 — Day Trace: Speed & Fuel Level and Safety Score card removed
+- **Telematics → Asset View:** the Day Trace chart (speed, fuel level / state of charge, harsh-event dots, day chips, trip zoom) is removed. The Trip Log rows are no longer clickable, since their only action was to zoom the trace. `useVehicleDayTrace` and `fact_vehicle_status` are no longer used by the dashboard.
+- **Telematics → Asset View:** the Safety Score KPI card is removed; four cards remain (Distance, Fuel Economy / Energy Use, Idle Share, Active DTCs). The fleet-level Fleet Safety Score on the Driver Safety tab is unchanged.
+
+## 2026-10-21 — Part View KPIs trimmed
+- **Component Reliability → Part View:** the Weibull Shape / Life, Failures / Running and Predicted cards are not shown; three cards remain (Field B10, Downtime per Failure, Parts Cost per Failure). The metrics documentation is updated to match.
+
 ## 2026-10-21 — KPI card deltas and sparklines removed
 - **All modules:** the green / red change-vs-previous-period line and the trend sparkline are no longer rendered on any KPI card. A card now shows title, badge, value and the hover tooltip only. Change is in the shared `KpiCard` component; the `delta`, `sparkline` and `subtitle` props passed by pages are ignored.
 

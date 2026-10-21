@@ -1,11 +1,11 @@
 import React, { useMemo } from "react";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Clock, Gauge, IndianRupee, ShieldCheck, Sigma, Target } from "lucide-react";
+import { ArrowLeft, Clock, IndianRupee, Target } from "lucide-react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import { usePartPrecursor } from "../../hooks/useReliabilityData";
 import { GROUP_PALETTE, HAZARD_STYLES, formatKm, partFailureRows, precursorSignature, weibullPlot } from "./reliabilityMetrics";
-import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatInr, formatNumber, formatPct } from "../telematics/telematicsFormat";
+import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatInr, formatNumber } from "../telematics/telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill } from "../telematics/TelematicsUi";
 import { HazardChart, WeibullPlot } from "./ReliabilityCharts";
 import { VariancePill } from "./FieldLifeTab";
@@ -71,7 +71,7 @@ export default function PartView({ partId, raw, lt, summaries, loading, onBack, 
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <KpiCard
           title="Field B10"
           value={formatKm(summary?.fieldB10)}
@@ -81,36 +81,6 @@ export default function PartView({ partId, raw, lt, summaries, loading, onBack, 
           iconColorClass="text-violet-600"
           loading={loading}
           tooltip="km of part life at which 10 % of parts have failed (running parts censored)."
-        />
-        <KpiCard
-          title="Weibull Shape / Life"
-          value={summary?.fit ? `${summary.fit.beta.toFixed(2)} / ${formatKm(summary.fit.eta)}` : "—"}
-          subtitle={summary?.pattern ?? "fewer than 10 failures"}
-          icon={Sigma}
-          iconBgClass="bg-sky-50"
-          iconColorClass="text-sky-600"
-          loading={loading}
-          tooltip="Shape β (below 1 infant mortality, about 1 random, above 1 wear-out) and characteristic life η (63 % failed)."
-        />
-        <KpiCard
-          title="Failures / Running"
-          value={`${formatNumber(summary?.failures)} / ${formatNumber(summary?.suspensions)}`}
-          subtitle={`${formatNumber(summary?.ratePer100k, 3)} per 100k km`}
-          icon={Gauge}
-          iconBgClass="bg-amber-50"
-          iconColorClass="text-amber-600"
-          loading={loading}
-          tooltip="Replacements vs parts still running (censored). Rate = failures ÷ km of part life × 100,000."
-        />
-        <KpiCard
-          title="Predicted"
-          value={formatPct(summary?.predictedPct)}
-          subtitle={`${formatPct(summary?.repeatPct, 1)} repeat repairs`}
-          icon={ShieldCheck}
-          iconBgClass="bg-emerald-50"
-          iconColorClass="text-emerald-600"
-          loading={loading}
-          tooltip="Share of this part's replacements done on a predicted visit; repeat = same truck within 10,000 km or 30 days."
         />
         <KpiCard
           title="Downtime per Failure"

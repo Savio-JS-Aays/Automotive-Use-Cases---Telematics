@@ -342,32 +342,19 @@ computed from penalties by the simulator, so it ignores the event filter.
 - period rows: `fact_vehicle_daily`, `fact_trip`, `fact_harsh_events` (with lat/lon, speed
   before → after, peak g);
 - active DTCs: `fact_dtc_event` with `status = 'active'` and `dim_dtc`;
-- the list of days available in `fact_vehicle_status` (the last 7 days).
 
 **Header:** VIN, powertrain pill, vehicle ID, model, region, application, customer type, primary
 driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 
 | KPI | Formula |
 |---|---|
-| Safety Score | distance-weighted daily `safety_score`; subtitle events, events / 1k km |
 | Distance | Σ km; operating days / days; km per operating day |
 | Fuel Economy / Energy Use | `Σ fuel_l (or energy_kwh) ÷ Σ km × 100`; delta = `(actual − rated) ÷ rated` labelled "vs rated" |
 | Idle Share | idle h ÷ engine h; diesel subtitle `Σ idle_fuel_l × ₹90` |
 | Active DTCs (NOW) | count of active DTC events; subtitle red lamp (`RSL`) / derate count. Click → Diagnostics |
 
 ### Charts
-**Day Trace: Speed & Fuel Level** (State of charge for BEV)
-- **Source:** `fact_vehicle_status` for one day (`useVehicleDayTrace`, loaded separately).
-- **Line (left axis):** `wheel_speed_kmh` against time.
-- **Line (right axis, 0–100 %):** `fuel_level_pct` (diesel) or `soc_pct` (BEV) for the same day.
-  Steps up are refuels / charging; a drop while parked is a possible fuel-theft signal.
-- **Dots:** harsh events at `speed_before_kmh`, coloured by severity.
-- **Reference:** 80 km/h line.
-- **Day chips:** the 7 available days, default the latest.
-- **Trip zoom:** clicking a trip in the trip log narrows the trace to that `trip_id`. Trips older
-  than 7 days have no trace and show a notice.
-- **Removed 2026-10-09:** the engine-state and tachograph strips, and the separate
-  "Fuel level (Selected Day)" chart, which is now the second line here.
+**Day Trace: Speed & Fuel Level** was removed from the Asset View on 2026-10-21 (earlier: merged with the Fuel level chart on 2026-10-09). `fact_vehicle_status` is no longer read by the dashboard, and trips in the trip log are no longer clickable.
 
 **Daily Distance & Engine Hours**
 - **Formula:** `distance_km` bars and `engine_hours` line per day.
@@ -377,7 +364,6 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 - **Columns:** start, route (start → end city), km, duration, consumption per 100 km,
   idle % = `idle_s ÷ (drive_s + idle_s + pto_s)`, events, eco.
 - **Controls:** search, CSV.
-- **Drill-down:** click → trip zoom.
 
 ---
 
@@ -396,8 +382,6 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 - **Client-side aggregation.** A 90-day range loads ~18k daily rows, ~30k trips and ~30k events.
   Move the heavy roll-ups into Postgres views or RPCs if the fleet grows beyond the 200-truck
   sample.
-- **Day trace window.** `fact_vehicle_status` holds only the last 7 days, so older trips can't be
-  traced.
 - **Heatmap time zone.** The heatmap uses the browser's local time zone. The data is IST, so a
   viewer in another zone sees shifted hours.
 - **Driver attribution.** Driver safety comes from the vehicle-day's assigned driver, while

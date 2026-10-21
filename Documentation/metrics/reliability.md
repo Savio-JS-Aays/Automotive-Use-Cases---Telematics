@@ -172,9 +172,6 @@ used and flagged "extrapolated".
 ## Part View (`?part=`)
 - **KPIs:**
   - field B10 (KM or extrapolated);
-  - Weibull shape / life (β / η and the pattern);
-  - failures / running, and rate per 100k km;
-  - predicted % and repeat %;
   - downtime per failure;
   - parts cost per failure (mean `part_cost_inr`).
 - **Weibull Probability Plot.**

@@ -1,29 +1,26 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, Fuel, Gauge, Route, ShieldCheck, Stethoscope, Timer, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Fuel, Gauge, Route, ShieldCheck, Stethoscope, Timer } from "lucide-react";
 import {
   Bar,
   CartesianGrid,
   ComposedChart,
   Legend,
   Line,
-  ReferenceLine,
   ResponsiveContainer,
-  Scatter,
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
-import { useTelematicsAssetData, useVehicleDayTrace } from "../../hooks/useTelematicsData";
+import { useTelematicsAssetData } from "../../hooks/useTelematicsData";
 import { useFilterStore } from "../../store/useFilterStore";
-import { OVERSPEED_LIMIT_KMH, assetDailyTrend, assetKpis, assetTrips, speedTrace } from "./telematicsMetrics";
+import { assetDailyTrend, assetKpis, assetTrips } from "./telematicsMetrics";
 import {
   AXIS_LINE,
   AXIS_TICK,
   GRID_STROKE,
   LEGEND_STYLE,
-  formatClock,
   formatDateTime,
   formatDay,
   formatInr,
@@ -32,63 +29,17 @@ import {
 } from "./telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill } from "./TelematicsUi";
 
-const SEVERITY_COLORS = { high: "#e11d48", medium: "#f59e0b", low: "#64748b" };
-
-function TraceTooltip({ active, payload, levelLabel }) {
-  if (!active || !payload?.length) return null;
-  const p = payload[0].payload;
-  return (
-    <div className="rounded-lg bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-slate-200">
-      <p className="font-semibold text-slate-700">{formatClock(p.t)}</p>
-      {p.label ? (
-        <p style={{ color: SEVERITY_COLORS[p.severity] }}>
-          {p.label} ({p.severity}) at {p.speed} km/h
-        </p>
-      ) : (
-        <>
-          <p className="text-slate-600">{p.speed === null ? "—" : `${p.speed.toFixed(0)} km/h`}</p>
-          {p.level !== null && p.level !== undefined && <p className="text-slate-400">{levelLabel} {Number(p.level).toFixed(1)}%</p>}
-        </>
-      )}
-    </div>
-  );
-}
-
 export default function AssetTelematicsView({ vehicleId }) {
   const navigate = useNavigate();
   const clearSelectedVin = useFilterStore((s) => s.clearSelectedVin);
   const { loading, error, raw } = useTelematicsAssetData(vehicleId);
 
-  const [dayChoice, setDayChoice] = useState(null);
-  const [tripId, setTripId] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const traceDay = dayChoice && raw.traceDays.includes(dayChoice) ? dayChoice : raw.traceDays[raw.traceDays.length - 1] ?? null;
-  const dayTrace = useVehicleDayTrace(vehicleId, traceDay);
-
   const kpis = useMemo(() => assetKpis(raw), [raw]);
   const daily = useMemo(() => assetDailyTrend(raw), [raw]);
   const trips = useMemo(() => assetTrips(raw), [raw]);
-  const trace = useMemo(() => speedTrace(dayTrace.trace, tripId), [dayTrace.trace, tripId]);
-  const domain = trace.points.length ? [trace.points[0].t, trace.points[trace.points.length - 1].t] : [0, 0];
-
-  const selectTrip = (trip) => {
-    if (tripId === trip.tripId) {
-      setTripId(null);
-      return;
-    }
-    if (!raw.traceDays.includes(trip.dateId)) {
-      setNotice(`Trip ${trip.tripId} is on ${formatDay(trip.dateId)}. 5-minute traces are kept for the last 7 days only, so no trace is available for it.`);
-      setTripId(trip.tripId);
-      return;
-    }
-    setNotice(null);
-    setDayChoice(trip.dateId);
-    setTripId(trip.tripId);
-  };
 
   const v = raw.vehicle;
   const bev = kpis.bev;
-  const levelLabel = bev ? "State of charge" : "Fuel level";
 
   if (error) {
     return (
@@ -134,18 +85,7 @@ export default function AssetTelematicsView({ vehicleId }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <KpiCard
-          title="Safety Score"
-          badge="PERIOD"
-          value={kpis.safety === null ? "—" : kpis.safety.toFixed(1)}
-          subtitle={`${kpis.events} events · ${kpis.eventsPer1000 === null ? "—" : kpis.eventsPer1000.toFixed(1)} / 1,000 km`}
-          icon={ShieldCheck}
-          iconBgClass="bg-emerald-50"
-          iconColorClass="text-emerald-600"
-          loading={loading}
-          tooltip="Distance-weighted daily safety score for this truck over the period (all drivers who drove it)."
-        />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Distance"
           badge="PERIOD"
@@ -194,68 +134,6 @@ export default function AssetTelematicsView({ vehicleId }) {
         />
       </div>
 
-      <ChartCard
-        title={`Day Trace: Speed & ${levelLabel}`}
-        badge="NOW"
-        tooltip={`rFMS 5-minute snapshots for one day: wheel speed (blue line, left axis) with harsh events as dots coloured by severity, and ${bev ? "battery state of charge" : "tank level"} (dark line, right axis). The dashed line is the 80 km/h governed limit. ${bev ? "Steps up in charge are charging sessions." : "Steps up in level are refuels; a drop while parked is a possible fuel-theft signal."} Pick a day, or click a trip in the log to zoom to it.`}
-        actions={
-          <div className="flex flex-wrap items-center gap-1">
-            {raw.traceDays.map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => {
-                  setDayChoice(d);
-                  setTripId(null);
-                  setNotice(null);
-                }}
-                className={`rounded-md px-2 py-1 text-xs font-medium ${
-                  d === traceDay ? "bg-sky-600 text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {formatDay(d)}
-              </button>
-            ))}
-            {tripId && (
-              <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-1 text-xs text-white">
-                Trip {tripId}
-                <button type="button" aria-label="Clear trip" onClick={() => { setTripId(null); setNotice(null); }}>
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            )}
-          </div>
-        }
-      >
-        {notice && <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">{notice}</p>}
-        {loading || dayTrace.loading ? (
-          <ChartSkeleton height="h-80" />
-        ) : raw.traceDays.length === 0 ? (
-          <EmptyChart message="No 5-minute snapshots for this truck (kept for the last 7 days only)." />
-        ) : trace.points.length === 0 ? (
-          <EmptyChart message="The truck did not run on this day or trip." />
-        ) : (
-          <>
-            <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart margin={{ right: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                <XAxis type="number" dataKey="t" domain={domain} tickFormatter={formatClock} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={32} />
-                <YAxis yAxisId="speed" dataKey="speed" unit=" km/h" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={60} domain={[0, "auto"]} />
-                <YAxis yAxisId="level" orientation="right" domain={[0, 100]} unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={40} />
-                <RechartsTooltip content={<TraceTooltip levelLabel={levelLabel} />} />
-                <Legend verticalAlign="bottom" height={24} iconType="circle" wrapperStyle={LEGEND_STYLE} />
-                <ReferenceLine yAxisId="speed" y={OVERSPEED_LIMIT_KMH} stroke="#e11d48" strokeDasharray="4 4" />
-                <Line yAxisId="speed" data={trace.points} dataKey="speed" name="Speed" stroke="#0ea5e9" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                <Line yAxisId="level" data={trace.points} dataKey="level" name={levelLabel} stroke={bev ? "#10b981" : "#0f172a"} strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
-                <Scatter yAxisId="speed" data={trace.events} dataKey="speed" name="Events" shape={(props) => (
-                  <circle cx={props.cx} cy={props.cy} r={5} fill={SEVERITY_COLORS[props.payload.severity] ?? "#64748b"} stroke="#fff" strokeWidth={1.5} />
-                )} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </>
-        )}
-      </ChartCard>
-
       <div className="grid grid-cols-1 gap-4">
         <ChartCard
           title="Daily Distance & Engine Hours"
@@ -285,11 +163,10 @@ export default function AssetTelematicsView({ vehicleId }) {
 
       <DataTable
         title="Trip Log"
-        tooltip="Every ignition cycle in the period, newest first. Click a trip to zoom the day trace and event log to it (traces exist for the last 7 days)."
+        tooltip="Every ignition cycle in the period, newest first."
         loading={loading}
         rows={trips}
         rowKey={(r) => r.tripId}
-        onRowClick={selectTrip}
         emptyMessage="No trips in this period."
         searchPlaceholder="Search city or trip ID"
         searchText={(r) => `${r.route} ${r.tripId}`}
@@ -302,7 +179,7 @@ export default function AssetTelematicsView({ vehicleId }) {
             sortValue: (r) => r.startTs,
             csv: (r) => r.startTs,
             render: (r) => (
-              <span className={`whitespace-nowrap text-xs ${r.tripId === tripId ? "font-semibold text-sky-700" : ""}`}>{formatDateTime(r.startTs)}</span>
+              <span className={`whitespace-nowrap text-xs `}>{formatDateTime(r.startTs)}</span>
             ),
           },
           { key: "route", label: "Route", sortValue: (r) => r.route, csv: (r) => r.route, render: (r) => <span className="text-xs">{r.route}</span> },
@@ -331,7 +208,7 @@ export default function AssetTelematicsView({ vehicleId }) {
 
       <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
         <Gauge className="h-3 w-3" />
-        Period metrics follow the global date range; the day trace uses rFMS snapshots, kept for the last 7 days.
+        Period metrics follow the global date range.
       </p>
     </div>
   );

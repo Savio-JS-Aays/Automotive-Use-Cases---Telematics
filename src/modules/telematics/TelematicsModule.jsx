@@ -74,7 +74,7 @@ function FleetTelematicsView() {
 
 /**
  * Telematics module. Fleet View = four tabs over the connected trucks in scope; Asset View
- * (selectedVin set) = one truck's trips, events and 5-minute day trace.
+ * (selectedVin set) = one truck's KPIs, daily trend and trips.
  * Formulas: Documentation/metrics/telematics.md.
  */
 export default function TelematicsModule() {
