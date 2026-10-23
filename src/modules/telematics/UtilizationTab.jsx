@@ -1,8 +1,9 @@
 import React, { useMemo, useRef, useState } from "react";
+import { BAR_CHART_PROPS, BAR_GRID, BAR_MAX_SIZE, BAR_RADIUS, BAR_X_AXIS, BAR_Y_AXIS, BAR_Y_AXIS_LEFT, MAX_LABELLED_BARS, VALUE_LABEL } from "../../components/ui/barStyle";
+import RankedBars from "../../components/ui/RankedBars";
 import { Activity, Gauge, Route, Truck } from "lucide-react";
 import {
   Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   ComposedChart,
@@ -12,6 +13,7 @@ import {
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
+  LabelList,
 } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import {
@@ -20,26 +22,19 @@ import {
   activityHeatmap,
   dataNow,
   hoursSplit,
-  utilizationByApplication,
-  utilizationDistribution,
   utilizationKpis,
-  utilizationMatrix,
+  MATRIX_DIMENSIONS,
+  MATRIX_METRICS,
+  dimensionMatrix,
 } from "./telematicsMetrics";
-import {
-  AXIS_LINE,
-  AXIS_TICK,
-  GRID_STROKE,
-  LEGEND_STYLE,
-  formatAgo,
-  formatDay,
-  formatNumber,
-  formatPct,
-  STATUS_STYLES,
-  truncateString,
-} from "./telematicsFormat";
+import { LEGEND_STYLE, formatAgo, formatDay, formatNumber, formatPct, STATUS_STYLES, truncateString } from "./telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, FilterChips, HeatGrid, Pill, Segmented } from "./TelematicsUi";
 
-const EMPTY_CROSS = { regionId: null, modelId: null, band: null, application: null, status: "All" };
+const EMPTY_CROSS = { regionId: null, modelId: null, application: null, vehicleType: null, powertrain: null, status: "All" };
+// Matrix dimension → the roster cross-filter key it sets when a cell is clicked.
+const DIM_CROSS_KEY = { region: "regionId", vehicleType: "vehicleType", model: "modelId", application: "application", powertrain: "powertrain" };
+const DIM_OPTIONS = Object.entries(MATRIX_DIMENSIONS).map(([value, d]) => ({ value, label: d.label }));
+const METRIC_OPTIONS = Object.entries(MATRIX_METRICS).map(([value, m]) => ({ value, label: m.label }));
 
 export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
   const [grain, setGrain] = useState("day");
@@ -50,9 +45,24 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
   const kpis = useMemo(() => utilizationKpis(raw), [raw]);
   const split = useMemo(() => hoursSplit(raw, grain), [raw, grain]);
   const heat = useMemo(() => activityHeatmap(raw, heatMetric), [raw, heatMetric]);
-  const matrix = useMemo(() => utilizationMatrix(trucks), [trucks]);
-  const distribution = useMemo(() => utilizationDistribution(trucks), [trucks]);
-  const byApp = useMemo(() => utilizationByApplication(trucks), [trucks]);
+  const [rowDim, setRowDim] = useState("region");
+  const [colDim, setColDim] = useState("model");
+  const [matrixMetric, setMatrixMetric] = useState("utilization");
+  const [matrixSearch, setMatrixSearch] = useState("");
+  const matrix = useMemo(() => dimensionMatrix(trucks, rowDim, colDim, matrixMetric), [trucks, rowDim, colDim, matrixMetric]);
+  const visibleRows = useMemo(() => {
+    const q = matrixSearch.trim().toLowerCase();
+    return matrix.rows.map((r, ri) => ({ r, ri })).filter(({ r }) => !q || String(r.label).toLowerCase().includes(q));
+  }, [matrix, matrixSearch]);
+  const pickRowDim = (d) => {
+    setRowDim(d);
+    if (d === colDim) setColDim(d === "region" ? "model" : "region");
+    setMatrixSearch("");
+  };
+  const pickColDim = (d) => {
+    setColDim(d);
+    if (d === rowDim) setRowDim(d === "region" ? "model" : "region");
+  };
   const now = useMemo(() => dataNow(raw), [raw]);
 
   const applyCross = (patch) => {
@@ -66,11 +76,9 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
         if (cross.regionId && t.regionId !== cross.regionId) return false;
         if (cross.modelId && t.modelId !== cross.modelId) return false;
         if (cross.application && t.applicationName !== cross.application) return false;
+        if (cross.vehicleType && t.vehicleType !== cross.vehicleType) return false;
+        if (cross.powertrain && t.powertrain !== cross.powertrain) return false;
         if (cross.status !== "All" && t.status !== cross.status) return false;
-        if (cross.band) {
-          const [lo, hi] = cross.band;
-          if (t.utilization === null || t.utilization < lo || t.utilization >= hi) return false;
-        }
         return true;
       }),
     [trucks, cross]
@@ -83,9 +91,10 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
   }, [trucks]);
 
   const chips = [
-    cross.regionId && { key: "regionId", label: `Region: ${matrix.rows.find((r) => r.id === cross.regionId)?.label ?? cross.regionId}` },
-    cross.modelId && { key: "modelId", label: `Model: ${matrix.cols.find((c) => c.id === cross.modelId)?.label ?? cross.modelId}` },
-    cross.band && { key: "band", label: `Utilization ${cross.band[0]}–${cross.band[1] > 100 ? "100" : cross.band[1]}%` },
+    cross.regionId && { key: "regionId", label: `Region: ${trucks.find((t) => t.regionId === cross.regionId)?.regionName ?? cross.regionId}` },
+    cross.modelId && { key: "modelId", label: `Model: ${trucks.find((t) => t.modelId === cross.modelId)?.modelLabel ?? cross.modelId}` },
+    cross.vehicleType && { key: "vehicleType", label: `Vehicle type: ${cross.vehicleType}` },
+    cross.powertrain && { key: "powertrain", label: `Powertrain: ${cross.powertrain === "bev" ? "Battery-electric" : "Diesel"}` },
     cross.application && { key: "application", label: `Application: ${cross.application}` },
   ].filter(Boolean);
 
@@ -157,19 +166,23 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
             <EmptyChart message="No activity in this period." />
           ) : (
             <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart data={split}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                <XAxis dataKey="date" tickFormatter={formatDay} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={24} />
-                <YAxis yAxisId="h" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={32} unit="h" />
-                <YAxis yAxisId="u" orientation="right" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={40} unit="%" />
+              <ComposedChart data={split} {...BAR_CHART_PROPS}>
+                <CartesianGrid {...BAR_GRID} />
+                <XAxis dataKey="date" tickFormatter={formatDay} {...BAR_X_AXIS} minTickGap={24} />
+                <YAxis yAxisId="h" {...BAR_Y_AXIS_LEFT} width={36} unit="h" />
+                <YAxis yAxisId="u" {...BAR_Y_AXIS} width={40} unit="%" />
                 <RechartsTooltip
                   labelFormatter={(d) => (grain === "week" ? `Week of ${formatDay(d)}` : formatDay(d))}
                   formatter={(v, name) => (name === "Utilization" ? [`${v}%`, name] : [`${v} h`, name])}
                 />
                 <Legend verticalAlign="bottom" height={28} iconType="circle" wrapperStyle={LEGEND_STYLE} />
-                <Bar yAxisId="h" dataKey="Drive" stackId="h" fill="#10b981" />
-                <Bar yAxisId="h" dataKey="Idle" stackId="h" fill="#f59e0b" />
-                <Bar yAxisId="h" dataKey="PTO" stackId="h" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                <Bar yAxisId="h" dataKey="Drive" stackId="h" fill="#10b981" maxBarSize={BAR_MAX_SIZE} />
+                <Bar yAxisId="h" dataKey="Idle" stackId="h" fill="#f59e0b" maxBarSize={BAR_MAX_SIZE} />
+                <Bar yAxisId="h" dataKey="PTO" stackId="h" fill="#8b5cf6" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE}>
+                  {split.length <= MAX_LABELLED_BARS && (
+                    <LabelList dataKey={(d) => `${Math.round((d.Drive ?? 0) + (d.Idle ?? 0) + (d.PTO ?? 0))} h`} {...VALUE_LABEL} />
+                  )}
+                </Bar>
                 <Line yAxisId="u" dataKey="utilization" name="Utilization" stroke="#0f172a" strokeWidth={2} dot={false} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
@@ -203,7 +216,7 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
                 minColWidth={12}
                 gapClass="gap-0.5"
                 max={heatMax}
-                rgb="16, 185, 129"
+                rgb="8, 145, 178"
                 cellFor={(ri, ci) => {
                   const v = heat.grid[ri][ci];
                   return {
@@ -224,111 +237,111 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
         </ChartCard>
 
         <ChartCard
-          title="Region × Model Utilization"
+          className="xl:col-span-2"
+          title={`${MATRIX_DIMENSIONS[rowDim].label} × ${MATRIX_DIMENSIONS[colDim].label}: ${MATRIX_METRICS[matrixMetric].label}`}
+          subtitle="Compare any dimension across any other, for utilization or drive, idle and PTO hours"
           badge="PERIOD"
-          tooltip="Utilization % for each region and model. Low cells are candidates for redeployment or a sales conversation about right-sizing. Click a cell to filter the roster below."
+          tooltip="Pick what to analyse (rows), what to compare it across (columns) and the metric. Utilization = engine-on hours ÷ 24 h per truck-day; drive, idle and PTO = average hours per truck-day. Totals are computed over all trucks in the row, column or fleet. Cells with fewer than 5 trucks are grey. Click a cell or total to filter the roster below."
         >
+          <div className="mb-4 space-y-2.5">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Analyse</span>
+                <Segmented value={rowDim} onChange={pickRowDim} options={DIM_OPTIONS} />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Across</span>
+                <Segmented value={colDim} onChange={pickColDim} options={DIM_OPTIONS.filter((o) => o.value !== rowDim)} />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Metric</span>
+                <Segmented value={matrixMetric} onChange={setMatrixMetric} options={METRIC_OPTIONS} />
+              </div>
+              <input
+                type="search"
+                value={matrixSearch}
+                onChange={(e) => setMatrixSearch(e.target.value)}
+                placeholder={`Find a ${MATRIX_DIMENSIONS[rowDim].label.toLowerCase()}…`}
+                className="w-56 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
+              />
+            </div>
+          </div>
           {loading ? (
             <ChartSkeleton />
-          ) : matrix.rows.length === 0 ? (
-            <EmptyChart message="No connected trucks match the filters." />
+          ) : visibleRows.length === 0 ? (
+            <EmptyChart message={matrix.rows.length === 0 ? "No connected trucks match the filters." : "Nothing matches that search."} />
           ) : (
             <>
               <HeatGrid
-                rows={matrix.rows}
+                rows={visibleRows.map(({ r }) => r)}
                 cols={matrix.cols}
-                colLabel={(c) => truncateString(c.label.replace("Mercedes-Benz ", "MB ").replace("BharatBenz ", "BB "), 14)}
-                max={60}
-                rgb="16, 185, 129"
-                cellFor={(ri, ci) => {
+                colLabel={(c) => truncateString(String(c.label).replace("Mercedes-Benz ", "MB ").replace("BharatBenz ", "BB "), 14)}
+                rowLabelWidth={110}
+                max={matrix.max}
+                rgb={MATRIX_METRICS[matrixMetric].rgb}
+                cellFor={(vi, ci) => {
+                  const ri = visibleRows[vi].ri;
                   const cell = matrix.cells[ri][ci];
-                  if (cell.trucks === 0) return { empty: true, title: "No trucks" };
+                  const where = `${matrix.rows[ri].label} × ${matrix.cols[ci].label}`;
+                  if (cell.trucks === 0) return { empty: true, title: `${where}: no trucks` };
                   return {
                     value: cell.value,
                     muted: cell.lowSample,
-                    display: cell.lowSample ? "—" : formatPct(cell.value, 0),
+                    display: cell.lowSample || cell.value === null ? "—" : MATRIX_METRICS[matrixMetric].format(cell.value),
                     sub: `${cell.trucks} trucks`,
-                    selected: cross.regionId === cell.rowId && cross.modelId === cell.colId,
-                    title: `${matrix.rows[ri].label} · ${matrix.cols[ci].label}: ${formatPct(cell.value)} utilization, ${cell.trucks} trucks${
+                    selected: cross[DIM_CROSS_KEY[rowDim]] === cell.rowId && cross[DIM_CROSS_KEY[colDim]] === cell.colId,
+                    title: `${where}: ${cell.value === null ? "no data" : MATRIX_METRICS[matrixMetric].long(cell.value)} · ${cell.trucks} trucks${
                       cell.lowSample ? ` (fewer than ${matrix.minTrucks}, not rated)` : ""
                     }`,
-                    onClick: () => applyCross({ regionId: cell.rowId, modelId: cell.colId }),
+                    onClick: () => applyCross({ [DIM_CROSS_KEY[rowDim]]: cell.rowId, [DIM_CROSS_KEY[colDim]]: cell.colId }),
                   };
                 }}
+                totals={{
+                  colLabel: `All ${MATRIX_DIMENSIONS[colDim].label.toLowerCase()}s`,
+                  rowLabel: `All ${MATRIX_DIMENSIONS[rowDim].label.toLowerCase()}s`,
+                  row: (vi) => {
+                    const ri = visibleRows[vi].ri;
+                    const t = matrix.rowTotals[ri];
+                    return {
+                      display: t.value === null ? "—" : MATRIX_METRICS[matrixMetric].format(t.value),
+                      sub: `${t.trucks} trucks`,
+                      title: `${matrix.rows[ri].label}, all ${MATRIX_DIMENSIONS[colDim].label.toLowerCase()}s: ${t.value === null ? "no data" : MATRIX_METRICS[matrixMetric].long(t.value)} · ${t.trucks} trucks`,
+                      onClick: () => applyCross({ [DIM_CROSS_KEY[rowDim]]: matrix.rows[ri].id }),
+                    };
+                  },
+                  col: (ci) => {
+                    const t = matrix.colTotals[ci];
+                    return {
+                      display: t.value === null ? "—" : MATRIX_METRICS[matrixMetric].format(t.value),
+                      sub: `${t.trucks} trucks`,
+                      title: `${matrix.cols[ci].label}, all ${MATRIX_DIMENSIONS[rowDim].label.toLowerCase()}s: ${t.value === null ? "no data" : MATRIX_METRICS[matrixMetric].long(t.value)} · ${t.trucks} trucks`,
+                      onClick: () => applyCross({ [DIM_CROSS_KEY[colDim]]: matrix.cols[ci].id }),
+                    };
+                  },
+                  grand: {
+                    display: matrix.grand.value === null ? "—" : MATRIX_METRICS[matrixMetric].format(matrix.grand.value),
+                    sub: `${matrix.grand.trucks} trucks`,
+                    title: `Whole fleet in scope: ${matrix.grand.value === null ? "no data" : MATRIX_METRICS[matrixMetric].long(matrix.grand.value)} · ${matrix.grand.trucks} trucks`,
+                  },
+                }}
               />
-              <p className="mt-3 text-[11px] text-slate-400">
-                Darker green = higher utilization. Grey cells have fewer than {matrix.minTrucks} trucks and are not rated.
-              </p>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                <span className="inline-flex items-center gap-2">
+                  Low
+                  <span
+                    className="inline-block h-2 w-24 rounded-full"
+                    style={{ background: `linear-gradient(90deg, rgba(${MATRIX_METRICS[matrixMetric].rgb}, 0.08), rgba(${MATRIX_METRICS[matrixMetric].rgb}, 0.9))` }}
+                  />
+                  High ({MATRIX_METRICS[matrixMetric].format(matrix.max)}+)
+                </span>
+                <span>Grey cells have fewer than {matrix.minTrucks} trucks and are not rated.</span>
+              </div>
             </>
           )}
         </ChartCard>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-          <ChartCard
-            title="Utilization Distribution"
-            badge="PERIOD"
-            tooltip="Number of trucks in each utilization band. Amber = under-used (< 20%), blue = normal, green = high (≥ 50%). Click a bar to list those trucks."
-          >
-            {loading ? (
-              <ChartSkeleton height="h-52" />
-            ) : noData ? (
-              <EmptyChart height="h-52" message="No trucks in scope." />
-            ) : (
-              <ResponsiveContainer width="100%" height={210}>
-                <BarChart data={distribution}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                  <XAxis dataKey="label" axisLine={AXIS_LINE} tickLine={false} interval={0} height={24} tick={{ ...AXIS_TICK, fontSize: 10 }} />
-                  <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={28} />
-                  <RechartsTooltip cursor={{ fill: "#f8fafc" }} labelFormatter={(l) => `Utilization ${l}%`} formatter={(v) => [`${v} trucks`, "Trucks"]} />
-                  <Bar dataKey="trucks" radius={[3, 3, 0, 0]} className="cursor-pointer" onClick={(d) => applyCross({ band: [d.lo ?? d.payload?.lo, d.hi ?? d.payload?.hi] })}>
-                    {distribution.map((b) => (
-                      <Cell key={b.label} fill={b.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </ChartCard>
-
-          <ChartCard
-            title="Utilization by Application"
-            badge="PERIOD"
-            tooltip="Utilization % per duty cycle (application). Shows the OEM which vocations run its trucks hardest, which drives service intervals and product positioning. Click a bar to filter the roster."
-          >
-            {loading ? (
-              <ChartSkeleton height="h-52" />
-            ) : byApp.length === 0 ? (
-              <EmptyChart height="h-52" message="No trucks in scope." />
-            ) : (
-              <ResponsiveContainer width="100%" height={210}>
-                <BarChart data={byApp} layout="vertical" margin={{ left: 4, right: 12 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                  <XAxis type="number" unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    width={120}
-                    tickFormatter={(v) => truncateString(v, 18)}
-                    tick={AXIS_TICK}
-                    axisLine={AXIS_LINE}
-                    tickLine={false}
-                  />
-                  <RechartsTooltip
-                    cursor={{ fill: "#f8fafc" }}
-                    formatter={(v, _n, item) => [`${v}% · ${item.payload.trucks} trucks · ${item.payload.kmPerOpDay} km/op. day`, "Utilization"]}
-                  />
-                  <Bar
-                    dataKey="utilization"
-                    fill="#0ea5e9"
-                    radius={[0, 3, 3, 0]}
-                    className="cursor-pointer"
-                    onClick={(d) => applyCross({ application: d.name ?? d.payload?.name })}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </ChartCard>
-        </div>
       </div>
 
       <DataTable
@@ -340,8 +353,8 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
         rowKey={(r) => r.vehicleId}
         onRowClick={(r) => onOpenAsset(r.vehicleId)}
         emptyMessage="No trucks match the current filters."
-        searchPlaceholder="Search VIN, vehicle or driver"
-        searchText={(r) => `${r.vin ?? ""} ${r.vehicleId} ${r.driverAlias ?? ""}`}
+        searchPlaceholder="Search VIN or vehicle"
+        searchText={(r) => `${r.vin ?? ""} ${r.vehicleId}`}
         initialSort={{ key: "utilization", dir: "asc" }}
         csvName="fleet-roster.csv"
         toolbar={
@@ -381,7 +394,6 @@ export default function UtilizationTab({ raw, trucks, loading, onOpenAsset }) {
               </>
             ),
           },
-          { key: "driver", label: "Primary Driver", sortValue: (r) => r.driverAlias, csv: (r) => r.driverAlias, render: (r) => <span className="text-xs">{r.driverAlias ?? "—"}</span> },
           { key: "status", label: "Status", sortValue: (r) => r.status, csv: (r) => r.status, render: (r) => <Pill className={STATUS_STYLES[r.status]}>{r.status}</Pill> },
           { key: "utilization", label: "Utilization", align: "right", sortValue: (r) => r.utilization, csv: (r) => r.utilization?.toFixed(1), render: (r) => formatPct(r.utilization) },
           { key: "km", label: "Distance", align: "right", sortValue: (r) => r.km, csv: (r) => Math.round(r.km), render: (r) => `${formatNumber(r.km)} km` },

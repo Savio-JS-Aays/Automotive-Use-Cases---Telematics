@@ -44,6 +44,9 @@ export const RISK_BANDS = [
 const AT_RISK_BANDS = new Set(["Critical", "High"]);
 const DUE_SOON_DAYS = 14;
 const MATRIX_MIN_TRUCKS = 5;
+const REPAIR_LOOKBACK_DAYS = 200; // enough for six calendar months of history
+const REPAIR_MONTHS_SHOWN = 6;
+const DATA_SOURCE_TAG = "telematics_sim";
 const HEALTH_LOOKBACK_DAYS = 14; // weekly predictions: two cycles guarantees one per truck × part
 const TREND_WINDOW_DAYS = 7;
 const MIN_PREV_COVERAGE = 0.8; // share of expected vehicle-days needed to show a delta
@@ -82,7 +85,7 @@ export function useOverviewData() {
   const customerType = useFilterStore((s) => s.customerType);
   const dateRange = useFilterStore((s) => s.dateRange);
 
-  const [raw, setRaw] = useState({ vehicles: [], health: [], alerts: [], dtcEvents: [], daily: [] });
+  const [raw, setRaw] = useState({ vehicles: [], health: [], repairs: [], dtcEvents: [], daily: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -112,7 +115,7 @@ export function useOverviewData() {
         const ids = vehicles.map((v) => v.vehicle_id);
 
         if (ids.length === 0) {
-          if (isMounted) setRaw({ vehicles, health: [], alerts: [], dtcEvents: [], daily: [] });
+          if (isMounted) setRaw({ vehicles, health: [], repairs: [], dtcEvents: [], daily: [] });
           return;
         }
 
@@ -126,11 +129,7 @@ export function useOverviewData() {
         const anchor = latestRun?.[0]?.ts ? new Date(latestRun[0].ts) : new Date();
         const healthFrom = new Date(anchor.getTime() - HEALTH_LOOKBACK_DAYS * DAY_MS).toISOString();
 
-        const trendFrom = toIsoDateString(
-          new Date(period.start.getTime() - (TREND_WINDOW_DAYS - 1) * DAY_MS)
-        );
-
-        const [health, alerts, dtcEvents, daily] = await Promise.all([
+        const [health, repairs, dtcEvents, daily] = await Promise.all([
           fetchAllRows(() =>
             supabase
               .from("fact_vehicle_health")
@@ -144,12 +143,13 @@ export function useOverviewData() {
           ),
           fetchAllRows(() =>
             supabase
-              .from("fact_vehicle_health")
-              .select("health_id, vehicle_id, date_id")
+              .from("fact_repair_orders")
+              .select("ro_id, vehicle_id, date_id, visit_type")
+              .eq("data_source", DATA_SOURCE_TAG)
               .in("vehicle_id", ids)
-              .eq("trigger", "alert")
-              .gte("date_id", trendFrom)
-              .order("health_id")
+              .in("visit_type", ["predicted", "breakdown"])
+              .gte("date_id", toIsoDateString(new Date(Date.now() - REPAIR_LOOKBACK_DAYS * DAY_MS)))
+              .order("ro_id")
           ),
           // DTC events are small (hundreds per 200 trucks): fetch them all for the scope.
           fetchAllRows(() =>
@@ -175,7 +175,7 @@ export function useOverviewData() {
           ),
         ]);
 
-        if (isMounted) setRaw({ vehicles, health, alerts, dtcEvents, daily });
+        if (isMounted) setRaw({ vehicles, health, repairs, dtcEvents, daily });
       } catch (err) {
         if (isMounted) setError(err);
       } finally {
@@ -375,38 +375,6 @@ export function useOverviewData() {
     [trucks]
   );
 
-  // ---- C2: Early-warning trend, 7-day rolling count per 100 trucks ----
-  const earlyWarningTrend = useMemo(() => {
-    const alertsByDate = new Map();
-    for (const a of raw.alerts) alertsByDate.set(a.date_id, (alertsByDate.get(a.date_id) ?? 0) + 1);
-    const dtcsByDate = new Map();
-    for (const e of raw.dtcEvents) {
-      if (!SERIOUS_DTC_SEVERITIES.has(e.dim_dtc?.severity_class)) continue;
-      dtcsByDate.set(e.date_id, (dtcsByDate.get(e.date_id) ?? 0) + 1);
-    }
-
-    const points = [];
-    for (let i = 0; i < period.days; i += 1) {
-      const day = new Date(period.start.getTime() + i * DAY_MS);
-      let alerts = 0;
-      let dtcs = 0;
-      for (let w = 0; w < TREND_WINDOW_DAYS; w += 1) {
-        const key = toIsoDateString(new Date(day.getTime() - w * DAY_MS));
-        alerts += alertsByDate.get(key) ?? 0;
-        dtcs += dtcsByDate.get(key) ?? 0;
-      }
-      const per100 = (n) => (fleetSize > 0 ? (n / fleetSize) * 100 : 0);
-      points.push({
-        date: toIsoDateString(day),
-        alertsPer100: Number(per100(alerts).toFixed(2)),
-        dtcsPer100: Number(per100(dtcs).toFixed(2)),
-        alerts,
-        dtcs,
-      });
-    }
-    return points;
-  }, [raw.alerts, raw.dtcEvents, period, fleetSize]);
-
   // ---- C3: Region × Model risk matrix ----
   const riskMatrix = useMemo(() => {
     const regions = new Map();
@@ -416,9 +384,9 @@ export function useOverviewData() {
       regions.set(t.regionId, t.regionName);
       models.set(t.modelId, t.modelLabel);
       const key = `${t.regionId}|${t.modelId}`;
-      const cell = cells.get(key) ?? { total: 0, atRisk: 0 };
+      const cell = cells.get(key) ?? { total: 0, bands: { Critical: 0, High: 0, Medium: 0, Low: 0 } };
       cell.total += 1;
-      if (AT_RISK_BANDS.has(t.band)) cell.atRisk += 1;
+      if (t.band in cell.bands) cell.bands[t.band] += 1;
       cells.set(key, cell);
     }
     const sortedEntries = (m) =>
@@ -431,19 +399,34 @@ export function useOverviewData() {
       minTrucks: MATRIX_MIN_TRUCKS,
       cells: rows.map((r) =>
         cols.map((c) => {
-          const cell = cells.get(`${r.id}|${c.id}`) ?? { total: 0, atRisk: 0 };
+          const cell = cells.get(`${r.id}|${c.id}`) ?? { total: 0, bands: { Critical: 0, High: 0, Medium: 0, Low: 0 } };
           return {
             regionId: r.id,
             modelId: c.id,
             total: cell.total,
-            atRisk: cell.atRisk,
-            pct: cell.total > 0 ? (cell.atRisk / cell.total) * 100 : null,
+            bands: cell.bands,
             lowSample: cell.total < MATRIX_MIN_TRUCKS,
           };
         })
       ),
     };
   }, [trucks]);
+
+  // ---- C5: Predicted vs breakdown repairs per month (not tied to the date filter) ----
+  const repairMix = useMemo(() => {
+    const byMonth = new Map();
+    for (const r of raw.repairs) {
+      const month = r.date_id.slice(0, 7);
+      const m = byMonth.get(month) ?? { month, predicted: 0, breakdown: 0 };
+      if (r.visit_type === "predicted") m.predicted += 1;
+      else m.breakdown += 1;
+      byMonth.set(month, m);
+    }
+    return [...byMonth.values()]
+      .sort((a, b) => (a.month < b.month ? -1 : 1))
+      .slice(-REPAIR_MONTHS_SHOWN)
+      .map((m) => ({ ...m, predictedPct: (m.predicted / (m.predicted + m.breakdown)) * 100 }));
+  }, [raw.repairs]);
 
   // ---- C4: Top predicted failures by part (at-risk trucks, worst part) ----
   const topFailingParts = useMemo(() => {
@@ -476,9 +459,9 @@ export function useOverviewData() {
     error,
     kpis,
     riskPosture,
-    earlyWarningTrend,
     riskMatrix,
     topFailingParts,
+    repairMix,
     actionRows,
   };
 }

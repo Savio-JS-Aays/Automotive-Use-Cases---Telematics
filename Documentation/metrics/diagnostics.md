@@ -9,14 +9,16 @@
 >   - UI in `modules/diagnostics/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01. The planned standalone DTC
 >   Analysis module is merged into the Fault Codes tab (see [dtc-analysis.md](dtc-analysis.md)).
-> - Last updated: 2026-10-21
+> - Last updated: 2026-10-23
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags in `FaultCodesTab.jsx` / `SignalHealthTab.jsx`; their formulas
 below remain valid and the KPI cards still show.
 - Fault Codes: DTC Rate Trend by Lamp, Fault Lifecycle, Operating Conditions at Fault.
-- Signal Health: Signals vs Normal Band, Anomaly Trend, Anomaly → DTC Lead Time (chart only),
-  DPF Soot Load vs Differential Pressure, SCR NOx Conversion Efficiency by Model.
+- Signal Health: Signals vs Normal Band, Anomaly Trend, Anomaly → DTC Lead Time (chart only; the KPI
+  card stays), DPF Soot Load vs Differential Pressure, SCR NOx Conversion Efficiency by Model.
+  (Signals vs Normal Band and the lead-time chart were briefly restored on 2026-10-22 and hidden
+  again on 2026-10-23.)
 
 ## Scope, periods and filters
 - **Scope:**
@@ -95,7 +97,8 @@ below remain valid and the KPI cards still show.
   - **Bar = distinct trucks** that had the fault in scope: `count(distinct vehicle_id) by dtc_id`.
     A truck that raised the same code five times counts once, so one noisy truck cannot dominate.
   - Times raised (`count(*)`) and active now (`count(status = 'active')`) are in the tooltip.
-  - Sorted by trucks descending, then by times raised. Top `TOP_FAULTS` = 10.
+  - Sorted by trucks descending, then by times raised. Top 30 (2026-10-22; was 10), in a scrolling
+    list about 22 rem tall so the card lines up with the matrix beside it.
   - **Name:** a plain-English name from `FAULT_NAMES` in `diagnosticsMetrics.js` (for example
     "Front brake lining worn" for `SPN1099-FMI18`). It is display text only. `dim_dtc` keeps the
     technical description, which the code drawer shows as a subtitle with the SPN / FMI. A code
@@ -108,11 +111,17 @@ below remain valid and the KPI cards still show.
   - **Footnote:** "Showing the top 10 of K faults · M trucks had at least one."
   - Scope toggle: Period / Active now.
   - Clicking a bar opens the code drawer, titled with the plain name.
-- **Faults by System × Model.** Heatmap.
-  - cell = new non-intermittent DTCs of (model, `dim_dtc.system`) ÷ the model's trucks in scope ×
-    100;
-  - models with fewer than 5 trucks are muted;
-  - clicking a cell filters the Active Fault Codes table (filter chip).
+- **Faults by System × Model / Region / Application.** Heatmap (`systemModelMatrix(raw, opts)`).
+  - cell = matching DTC events of (group, `dim_dtc.system`) ÷ the group's trucks in scope × 100;
+  - **filters (card header, 2026-10-22):** rows by Model / Region / Application; scope *New in
+    period* (non-intermittent, first seen in the period; default) or *Active now* (`status = 'active'`);
+    severity (all / critical / major / minor, `dim_dtc.severity_class`); lamp (all / red = RSL, PL /
+    amber = AWL, MIL);
+  - groups with fewer than 5 trucks are muted;
+  - clicking a cell opens a pop-up (`systemMatrixCell`, same filters as the matrix): the cell's fault
+    codes as ranked bars (count and trucks; click one for the code detail panel) and every event as a
+    table (truck, fault, lamp, severity, first seen, status) with search; a row opens the truck.
+    It no longer filters the Active Fault Codes table.
 - **DTC Rate Trend by Lamp.** Stacked area.
   - per day and lamp: Σ new DTCs over the trailing 7 days ÷ Σ km over the same 7 days × 10,000;
   - the lamp layers add up to the total rate.
@@ -158,7 +167,6 @@ below remain valid and the KPI cards still show.
 | Trucks with Critical Signal | NOW | distinct trucks with at least one latest reading in the **critical** state |
 | Signals Out of Band | NOW | count of (truck × signal) latest readings not in the **normal** state, out of all pairs |
 | Trucks with Anomalies | PERIOD | distinct trucks with `anomalous_readings > 0` on some day of the period |
-| Anomalous Reading Rate | PERIOD | Σ `anomalous_readings` ÷ Σ `readings` × 100 |
 | Anomaly → DTC Lead Time | PERIOD | median lead time (below). Subtitle: share of linked DTCs that had a prior anomaly |
 
 ### Charts
@@ -178,6 +186,12 @@ below remain valid and the KPI cards still show.
   - the footnote states how many trucks have a warning or critical signal and the active sort;
   - columns are the health signals present that have a normal band;
   - clicking a cell opens Asset View with `?signal=`.
+  - **Rows toggle (2026-10-23): Trucks / Models / Applications** (`signalHeatGroups`). Grouped views
+    show, per group × signal, the share of the group's trucks whose latest reading is in **warning or
+    critical** (colour and %; small number = trucks / trucks reporting; hover adds critical, warning,
+    outside-normal counts and mean max |z|). Rows sort by the share of the group's trucks with any
+    warning or critical signal. Clicking a group cell returns to the truck view filtered to that group
+    (chip with clear and "Back to models / applications") and sorted by that signal.
 - **Signals vs Normal Band.** One row per signal on its own scale.
   - the shaded area is the normal band; ticks mark warning and critical;
   - box = P25–P75, whiskers = P5–P95, tick = median, all over the trucks' latest values;
@@ -198,6 +212,17 @@ below remain valid and the KPI cards still show.
   - lead time = first-seen date − the earliest day in [first seen − 30 days, first seen] where
     that truck × signal had `anomalous_readings > 0`;
   - buckets: same day / 1–3 / 4–7 / 8–14 / 15–30 days / no warning.
+- **Signal Watchlist.** Table (2026-10-22), `signalWatchlist`. One row per truck × health signal
+  whose latest daily mean (`mv_telemetry_daily.avg_value`) is outside the normal band, sorted
+  critical → warning → outside, then by days out of band, then worsening first.
+  - **Days out:** period days whose daily mean is not normal.
+  - **Trend (14 d):** least-squares slope of the daily mean over the last 14 days with data, per
+    week; *worsening* / *improving* relative to the signal's `direction`, *stable* when the weekly
+    change is under 2 % of the band width (needs ≥ 3 days).
+  - **Linked fault:** an active DTC on the truck whose freeze frame names this signal; otherwise
+    "No code yet" (a drift the ECU has not flagged). **Likely part:** highest-likelihood part for that
+    code in `bridge_dtc_part`.
+  - Search, sort, CSV; a row opens the Asset View on that signal (`?signal=`).
 
 ## Asset View
 **Sources:**

@@ -10,7 +10,7 @@
 > - Module status: **Implemented (new data model)**, 2026-10-01. Nav link: "Telematics".
 > - Audience: fleet manager (utilization, fuel), safety manager (drivers), OEM connected
 >   services (data health), OEM product / pre-sales (model benchmark).
-> - Last updated: 2026-10-21
+> - Last updated: 2026-10-22
 
 ## Principles
 - **Fleet View = 4 tabs**; the tab is kept in the URL (`?tab=utilization|fuel|safety|data`).
@@ -128,28 +128,34 @@ engine-off. A 24 h rule flagged 28 parked trucks as silent. Result on 2026-09-30
   - "Fleet running %" = `engine-on hours in cell ÷ (N × number of that weekday in period) × 100`;
   - "Trip starts" = `trip starts in cell ÷ number of that weekday`.
 
-**Region × Model Utilization** (heat grid)
-- **Cell:** `Σ engine_hours ÷ (Σ vehicle-days × 24)` over the trucks in the cell.
-- **Low sample:** cells with < 5 trucks are grey and not rated.
-- **Drill-down:** click → roster filtered to that region and model.
+**Dimension × Dimension matrix** (heat grid; replaced the fixed "Region × Model Utilization", 2026-10-22)
+- **Controls:** *Analyse* (rows) and *Across* (columns) each pick one of Region, Vehicle Type
+  (`v_vehicle_context.vehicle_type`), Model, Application, Powertrain; the two can't be the same.
+  *Metric* picks Utilization, Drive, Idle or PTO. A search box filters the rows. Default Region × Model, Utilization.
+- **Cell (ratio of sums over the trucks in the cell):**
+  - Utilization = `Σ engine_hours ÷ (Σ vehicle-days × 24) × 100`;
+  - Drive / Idle / PTO = `Σ drive_hours (idle_hours, pto_hours) ÷ Σ vehicle-days`, i.e. hours per truck-day.
+- **Totals:** an "All …" column (row total), an "All …" row (column total) and the grand total, each
+  computed over all trucks in that row, column or scope with the same formula (not an average of cells).
+- **Colour:** indigo for Utilization, sky blue for Drive, amber for Idle, violet for PTO. Utilization saturates at
+  60 %; the hour metrics saturate at the largest rated cell.
+- **Low sample:** cells with < 5 trucks are grey and not rated (totals are always shown).
+- **Drill-down:** a cell filters the roster by both dimensions; a total filters by its one dimension.
+  New roster cross-filters: vehicle type and powertrain.
+- **Code:** `MATRIX_DIMENSIONS`, `MATRIX_METRICS`, `dimensionMatrix` in `telematicsMetrics.js`;
+  `HeatGrid` gained an optional `totals` prop.
 
-**Utilization Distribution** (bar)
-- **Formula:** trucks per 10-point utilization bin (0–10 … 60+).
-- **Colours:** < 20 % amber (under-used), 20–50 % blue, ≥ 50 % green.
-- **Drill-down:** click → roster filtered to that bin.
+**Utilization Distribution** removed 2026-10-22 (with its utilization-band roster filter).
 
-**Utilization by Application** (horizontal bar)
-- **Formula:** utilization per `application_name`; the tooltip adds trucks and km per operating
-  day.
-- **Drill-down:** click → roster filtered to that application.
+**Utilization by Application** removed 2026-10-22; use the matrix with Analyse = Application.
 
 ### Table: Fleet Roster
-- **Columns:** truck (VIN, model · region), primary driver alias, status pill, utilization,
+- **Columns:** truck (VIN, model · region), status pill, utilization,
   distance, idle %, safety, eco, data completeness, last ping.
 - **Controls:**
   - status pills with counts;
-  - cross-filter chips;
-  - search (VIN / vehicle / driver);
+  - cross-filter chips (region, model, application, vehicle type, powertrain);
+  - search (VIN / vehicle);
   - sort on any column (default utilization ascending);
   - CSV export.
 - **Drill-down:** row click → Asset View.
@@ -168,6 +174,7 @@ scope.
 | Idle Share | `Σ idle_hours ÷ Σ engine_hours × 100` | pp |
 
 ### Charts
+
 **Consumption Trend by Model** (line per model)
 - **Formula:** 7-day rolling `Σ fuel ÷ Σ km × 100` (or kWh) per model.
 - **Reference:** dashed line = `dim_v_model.base_consumption` (rated).
@@ -241,9 +248,13 @@ scope.
 ---
 
 ## Tab 3 · Driver Safety
-### Local filter bar
-Applies to event counts, rates, event mix and the scorecard's event columns, and to the groups in both group views. The safety score is
-computed from penalties by the simulator, so it ignores the event filter.
+### Filters (each sits next to what it changes; redistributed 2026-10-22)
+The tab has no global filter bar any more.
+
+**Event filter**: a bar inside a shaded panel that also holds the two charts it filters,
+**Event Rate by Family** and the event rate (right-hand value) of **Safety by Group**. It does not change
+the KPI cards, the safety-band bars, Event Type × Severity or the speed bands. The safety score is computed from penalties by
+the simulator, so it never follows the event filter.
 
 **Event families** (multi-select chips):
 
@@ -254,50 +265,48 @@ computed from penalties by the simulator, so it ignores the event filter.
 | ADAS | aba_warning, aba_full_brake, lane_departure, close_following |
 | Idling | excessive_idle |
 
-**Other controls:**
 - **Severity:** all / high / medium / low.
-- **Group by:** Model (default) / Application / Region. Drives the Safety Risk chart.
-- **"Rate drivers with":** ≥ 100 / 500 (default) / 1,000 / 3,000 km. Used by the score
-  distribution, the quadrant and the Coach-now % column, to exclude small samples.
-- **Event:** a single type, set by clicking a matrix cell and shown as a chip.
+- **Event:** a single type, set by clicking an Event Type × Severity cell and shown as a chip in the
+  event filter bar.
+
+**Group by** (Model default / Application / Region) and **"Rate trucks with"** (≥ 100 / 500 default /
+1,000 / 3,000 km): in the header of the combined "Safety by group" chart only ("Rate trucks with" also
+feeds the hidden Coaching Quadrant).
 
 ### KPIs
 | Title | Formula | Delta |
 |---|---|---|
 | Fleet Safety Score | distance-weighted daily `safety_score` (formula in [02 §5](../02_Domain_Theory.md#5-driver-behaviour)) | pts |
-| Events per 1,000 km | `count(filtered events) ÷ Σ distance_km × 1000` | lower is better |
-| High-Severity Events | `count(filtered events with severity = high)` | — |
+| Events per 1,000 km | `count(all events) ÷ Σ distance_km × 1000` (not filtered) | lower is better |
+| High-Severity Events | `count(events with severity = high)` (not filtered) | — |
 | ADAS Activations | ADAS-family events on `adas_equipped` trucks ÷ their km × 1000 | — |
 
 ### Charts
 **Event Rate by Family** (stacked area)
-- **Formula:** per family, `7-day Σ events ÷ 7-day Σ km × 1000`.
+- **Formula:** per family, `Σ events ÷ Σ km × 1000` over a rolling window: 7 days (default) or
+  1 day ("Daily").
+- **Card filters (2026-10-22):** model, region and application selects, plus the 7-day / Daily
+  switch. The selects limit both the events and the km (`fact_vehicle_daily.distance_km`) to the
+  matching trucks, so the rate stays a true rate. The subtitle shows how many trucks match. The event
+  filter above (families, severity, event type) also applies.
 
-**Safety Risk by Model / Application / Region** (stacked horizontal bar; replaced "Worst 10 Drivers by Safety Score" on 2026-10-01)
-- **Why:** per-driver rankings are not useful for an OEM audience. Risk comes from the truck, the
-  duty cycle and the region, so the chart compares groups.
-- **Groups come from the vehicle** (`v_vehicle_context`): `model_label`, `application_name` or
-  `region_name`. Daily rows, events and trips all carry `vehicle_id`, so no driver mapping is
-  needed.
-- **Formula:** per group, `count(filtered events) ÷ Σ distance_km × 1000`, stacked by event family
-  (`events of family ÷ Σ distance_km × 1000`). Sorted highest rate first.
-- **Why events per 1,000 km and not the safety score:** group scores average out to a narrow band
-  (about 82–88 on the seeded data), which looks flat. The event rate is zero-based and shows the
-  spread (about 12 for mining and about 5 for freight). The score is in the tooltip and the table.
-- **Reference line:** the fleet rate, `Σ events ÷ Σ km × 1000` over all groups in scope.
-- **Tooltip:** rate, safety score, the rate per family, trucks, distance, high-severity share,
-  and a note when the group has fewer than 5 trucks.
-- **Colours:** the event-family colours.
-- **Filters:** event family, severity, group by, and all global filters.
+**Safety by Group: Score Bands & Event Rate** (100 % stacked band bars; 2026-10-22 merge of
+"Safety Risk by group" and "Truck Safety Score Distribution")
+- **One row per group** (model, application or region), inside the event-filter panel.
+- **Bar:** share of the group's rated trucks in each safety band, from `truckStats.safety`
+  (distance-weighted daily `safety_score`): Coach now < 70 (red), Watch 70–85 (amber), Good ≥ 85
+  (green). Trucks below the "Rate trucks with" distance are not rated. `safetyBandsByGroup`.
+- **Value on the right:** events per 1,000 km for the group = `count(filtered events) ÷ Σ km × 1000`
+  (`safetyByGroup`); it follows the event filter, the bands do not.
+- **Sort:** Coach-now share, then Watch share, then event rate, descending. Fleet rate in the footnote.
+- **Hover:** truck counts per band, event rate split by family, group safety score.
+- **Drill-down (pop-up):** clicking a band (or a row) opens a pop-up listing the group's trucks in that band, lowest score first,
+  each as a single bar of its safety score; a band switch, a search box (VIN, vehicle, model) and
+  click-through to the Asset View. Per-truck event rate in the hover counts all event types.
 
 **Event Type × Severity** (heat grid)
 - **Formula:** counts in the period. The grid ignores the local filter, because it *is* one.
 - **Drill-down:** click → sets event type + severity for the whole tab.
-
-**Driver Safety Score Distribution** (bar)
-- **Formula:** drivers per 5-point bin (< 60 … 95+), coloured by band. A count per band with no
-  names; it shows how much of the driver pool needs coaching.
-- **No click-through** (it used to filter the driver scorecard).
 
 **Coaching Quadrant: Eco vs Safety** (bubble) _(hidden 2026-10-01: `SHOW.coachingQuadrant` in DriverSafetyTab.jsx)_
 - **One bubble per driver:** x = eco (trips), y = safety, size = km.
@@ -306,7 +315,13 @@ computed from penalties by the simulator, so it ignores the event filter.
 
 **Time in Speed Bands** (100 % stacked bar)
 - **Formula:** `Σ speed_class_s` per band (0–30, 30–50, 50–70, 70–80, > 80 km/h) ÷ total.
-- **Local filter:** by application or by model.
+- **Local filter:** by application, by model or by vehicle type (`v_vehicle_context.vehicle_type`).
+- **Value on each row:** share of driving time above 80 km/h; rows sorted by it.
+- **Drill-down (2026-10-22, pop-up):** clicking a group row, or one of its coloured band segments, opens a
+  pop-up listing every truck in that group with its own 100 % stacked band bar
+  (`speedProfileByVehicle`: same formula per `vehicle_id`). Trucks are sorted by their share in the
+  clicked band (default > 80); clicking a band in the list re-sorts, clicking a truck opens its Asset View.
+  A search box filters the list by VIN, vehicle ID or model.
 
 ## Tab 4 · Data Health
 ### KPIs
@@ -318,19 +333,18 @@ computed from penalties by the simulator, so it ignores the event filter.
 | Silent Trucks | trucks with status Silent (see the status rules above) | — |
 
 ### Charts
-**Completeness Trend**
-- **Formula:** 7-day rolling received ÷ expected.
+**Completeness Trend by Region / Model** (multi-line; 2026-10-22 merge of "Completeness Trend" and
+"Completeness by Group")
+- **Formula:** per group and day, 7-day rolling `Σ packets_received ÷ Σ packets_expected × 100`
+  (`completenessTrendBy`); the dashed dark line is the whole fleet (`completenessTrend`).
+- **Toggle:** Region (default) or Model. The telematics-unit-source option was removed.
+- **Legend:** each group with its period completeness, weakest first; hover lists values lowest first.
 - **Reference:** 95 % target line.
-
-**Completeness by Group** (horizontal bar)
-- **Local toggle:** by region, telematics unit source (`telematics_source`) or model.
-- **Order:** weakest first.
-- **Colours:** amber below 95 %.
 
 ### Table: Connectivity Watchlist
 - **Rows:** trucks that are Silent or below 90 %. "Only trucks with an issue" is on by default;
   untick it to see all trucks.
-- **Columns:** unit source, status, completeness, packets received / expected, last ping.
+- **Columns:** truck, status, completeness, packets received / expected, last ping (unit source removed 2026-10-22).
 - **Controls:** CSV.
 - **Drill-down:** row → Asset View.
 
@@ -358,6 +372,16 @@ driver, last ping. Buttons: "Open in Diagnostics", "Back to fleet".
 
 **Daily Distance & Engine Hours**
 - **Formula:** `distance_km` bars and `engine_hours` line per day.
+
+**Data Completeness Trend** (line; added 2026-10-22, beside Daily Distance & Engine Hours)
+- **Formula:** per day `packets_received ÷ packets_expected × 100` from this truck's
+  `fact_vehicle_daily` (`assetCompletenessTrend`); one line, no rolling average (removed 2026-10-22).
+- **Date range (own filter, 2026-10-22):** Page period (default, follows the global range), last 7 / 30 /
+  90 days ending on the latest data day, or Custom (from / to dates). The chart fetches this truck's
+  `fact_vehicle_daily` packets for that range itself (`useVehicleCompleteness`), so it can look further
+  back than the rest of the page.
+- **Subtitle:** completeness over the selected range = `Σ received ÷ Σ expected`. Reference: 95 % target line.
+- **Hover:** packets received of expected for the day.
 
 ### Tables
 **Trip Log** (newest first)

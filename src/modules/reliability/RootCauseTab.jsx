@@ -1,7 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { CLEAR_CAUSE_SHARE, MIN_PRECURSOR_FAILURES, dtcConfirmation, mainCauses, precursorMatrix } from "./reliabilityMetrics";
 import { formatNumber, formatPct } from "../telematics/telematicsFormat";
-import { ChartCard, ChartSkeleton, DataTable, EmptyChart, HeatGrid, Pill } from "../telematics/TelematicsUi";
+import { ChartCard, ChartSkeleton, DataTable, EmptyChart, HeatGrid, LocalSelect, Pill, Segmented } from "../telematics/TelematicsUi";
 
 const SHORT_SIGNAL = {
   AIR_PRESSURE: "Air P",
@@ -25,9 +25,88 @@ function GapPill({ gap }) {
   return <Pill className={big ? (gap < 0 ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700") : "bg-emerald-50 text-emerald-700"}>{`${gap > 0 ? "+" : ""}${gap.toFixed(0)} pp`}</Pill>;
 }
 
+const PAGE_SIZE = 10;
+
+/** Prev / next pager with "x–y of n". */
+function Pager({ page, total, onPage }) {
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (total <= PAGE_SIZE) return null;
+  const from = page * PAGE_SIZE + 1;
+  const to = Math.min(total, (page + 1) * PAGE_SIZE);
+  const btn = "rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 enabled:hover:bg-slate-50 disabled:opacity-40";
+  return (
+    <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+      <span>
+        {from}–{to} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button type="button" className={btn} disabled={page === 0} onClick={() => onPage(page - 1)}>
+          ← Prev
+        </button>
+        <span>
+          Page {page + 1} of {pages}
+        </span>
+        <button type="button" className={btn} disabled={page >= pages - 1} onClick={() => onPage(page + 1)}>
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const searchBox = "w-40 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none";
+
 export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }) {
-  const causes = useMemo(() => mainCauses(lt, summaries), [lt, summaries]);
+  const causes = useMemo(() => mainCauses(lt, summaries, Infinity), [lt, summaries]);
   const precursor = useMemo(() => precursorMatrix(raw, lt), [raw, lt]);
+
+  // Main Failure Cause: search, subsystem, clear-target filter, sort, pages of 10
+  const [causeQ, setCauseQ] = useState("");
+  const [causeSub, setCauseSub] = useState("all");
+  const [causeClear, setCauseClear] = useState("all");
+  const [causeSort, setCauseSort] = useState("failures");
+  const [causePage, setCausePage] = useState(0);
+  const subsystemOptions = (rows) => [
+    { value: "all", label: "All subsystems" },
+    ...[...new Set(rows.map((r) => r.subsystem).filter(Boolean))].sort().map((v) => ({ value: v, label: v })),
+  ];
+  const causeRows = useMemo(() => {
+    const q = causeQ.trim().toLowerCase();
+    const rows = causes.rows.filter(
+      (r) =>
+        (!q || `${r.partName} ${r.main?.mode ?? ""}`.toLowerCase().includes(q)) &&
+        (causeSub === "all" || r.subsystem === causeSub) &&
+        (causeClear === "all" || (causeClear === "clear" ? r.clear : !r.clear))
+    );
+    return causeSort === "share" ? [...rows].sort((a, b) => (b.main?.share ?? 0) - (a.main?.share ?? 0) || b.failures - a.failures) : rows;
+  }, [causes.rows, causeQ, causeSub, causeClear, causeSort]);
+  const causePageRows = causeRows.slice(causePage * PAGE_SIZE, (causePage + 1) * PAGE_SIZE);
+  const resetCause = (fn) => (v) => {
+    fn(v);
+    setCausePage(0);
+  };
+
+  // Precursor Ramp: search, subsystem, signal, minimum ramp, pages of 10
+  const [preQ, setPreQ] = useState("");
+  const [preSub, setPreSub] = useState("all");
+  const [preSignal, setPreSignal] = useState("all");
+  const [preMin, setPreMin] = useState("0");
+  const preCols = useMemo(() => (preSignal === "all" ? precursor.cols : precursor.cols.filter((c) => c.id === preSignal)), [precursor.cols, preSignal]);
+  const preRows = useMemo(() => {
+    const q = preQ.trim().toLowerCase();
+    const min = Number(preMin);
+    return precursor.rows.filter((r) => {
+      if (q && !r.label.toLowerCase().includes(q)) return false;
+      if (preSub !== "all" && r.subsystem !== preSub) return false;
+      if (min > 0) {
+        const best = Math.max(0, ...preCols.map((c) => precursor.cells.get(`${r.id}|${c.id}`)?.ramp ?? 0));
+        if (best < min) return false;
+      }
+      return true;
+    });
+  }, [precursor, preCols, preQ, preSub, preMin]);
+  const prePageRows = preRows;
+  const resetPre = (fn) => (v) => fn(v);
   const confirmation = useMemo(() => dtcConfirmation(raw, lt), [raw, lt]);
 
   const columns = [
@@ -53,19 +132,45 @@ export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4">
         <ChartCard
           title="Main Failure Cause by Part"
-          tooltip={`The ${causes.rows.length} most-replaced parts, ranked by failures. Under each part: the failure mode that causes most of its failures, from the workshop's failure-mode code. When one mode is ${CLEAR_CAUSE_SHARE} % or more of a part's failures it is flagged "Clear target": a concrete corrective action for the supplier or design team. Hover a row for every mode. Click a row for the Part View.`}
+          subtitle={`${causeRows.length} of ${causes.rows.length} parts with failures`}
+          actions={
+            <>
+              <input type="search" value={causeQ} onChange={(e) => resetCause(setCauseQ)(e.target.value)} placeholder="Search part or mode" className={searchBox} />
+              <LocalSelect label="" value={causeSub} onChange={resetCause(setCauseSub)} options={subsystemOptions(causes.rows)} />
+              <LocalSelect
+                label=""
+                value={causeClear}
+                onChange={resetCause(setCauseClear)}
+                options={[
+                  { value: "all", label: "All parts" },
+                  { value: "clear", label: "Clear target only" },
+                  { value: "mixed", label: "Mixed causes only" },
+                ]}
+              />
+              <Segmented
+                size="xs"
+                value={causeSort}
+                onChange={resetCause(setCauseSort)}
+                options={[
+                  { value: "failures", label: "By failures" },
+                  { value: "share", label: "By main-cause share" },
+                ]}
+              />
+            </>
+          }
+          tooltip={`Every part with failures, ranked by failures (or by how dominant its main cause is), 10 per page. Under each part: the failure mode that causes most of its failures, from the workshop's failure-mode code. When one mode is ${CLEAR_CAUSE_SHARE} % or more of a part's failures it is flagged "Clear target": a concrete corrective action for the supplier or design team. Hover a row for every mode. Click a row for the Part View.`}
         >
           {loading ? (
             <ChartSkeleton height="h-96" />
-          ) : causes.rows.length === 0 ? (
-            <EmptyChart height="h-96" message="No failures." />
+          ) : causeRows.length === 0 ? (
+            <EmptyChart height="h-96" message={causes.rows.length === 0 ? "No failures." : "No part matches these filters."} />
           ) : (
             <>
               <ul className="space-y-3">
-                {causes.rows.map((r) => (
+                {causePageRows.map((r) => (
                   <li key={r.partId}>
                     <button
                       type="button"
@@ -96,8 +201,9 @@ export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }
                   </li>
                 ))}
               </ul>
-              <p className="mt-3 text-[11px] text-slate-400">
-                Top {causes.rows.length} parts by failures · {causes.clearCount} with a clear target (one mode ≥ {CLEAR_CAUSE_SHARE}% of the part's failures).
+              <Pager page={causePage} total={causeRows.length} onPage={setCausePage} />
+              <p className="mt-2 text-[11px] text-slate-400">
+                {causes.clearCount} of {causes.rows.length} parts have a clear target (one mode ≥ {CLEAR_CAUSE_SHARE}% of the part's failures, at least 5 failures).
               </p>
             </>
           )}
@@ -105,17 +211,41 @@ export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }
 
         <ChartCard
           title="Precursor Ramp (Part × Signal)"
+          subtitle={`${preRows.length} of ${precursor.rows.length} parts with ≥ ${MIN_PRECURSOR_FAILURES} failures inside the telemetry window`}
+          actions={
+            <>
+              <input type="search" value={preQ} onChange={(e) => resetPre(setPreQ)(e.target.value)} placeholder="Search part" className={searchBox} />
+              <LocalSelect label="" value={preSub} onChange={resetPre(setPreSub)} options={subsystemOptions(precursor.rows)} />
+              <LocalSelect
+                label=""
+                value={preSignal}
+                onChange={resetPre(setPreSignal)}
+                options={[{ value: "all", label: "All signals" }, ...precursor.cols.map((c) => ({ value: c.id, label: SHORT_SIGNAL[c.id] ?? c.id }))]}
+              />
+              <LocalSelect
+                label=""
+                value={preMin}
+                onChange={resetPre(setPreMin)}
+                options={[
+                  { value: "0", label: "Any ramp" },
+                  { value: "1.5", label: "Ramp ≥ 1.5×" },
+                  { value: "2", label: "Ramp ≥ 2×" },
+                  { value: "3", label: "Ramp ≥ 3×" },
+                ]}
+              />
+            </>
+          }
           tooltip={`For failures inside the telemetry window: mean |z-score| of each signal in the 7 days before the replacement ÷ the same 21–30 days before. Above 1× = the signal drifted towards the failure, i.e. a usable early-warning signal for that part. Cells need at least ${MIN_PRECURSOR_FAILURES} failures. Click a cell to open the part.`}
         >
           {loading ? (
             <ChartSkeleton height="h-96" />
-          ) : precursor.rows.length === 0 ? (
-            <EmptyChart height="h-96" message="Not enough failures inside the telemetry window." />
+          ) : prePageRows.length === 0 ? (
+            <EmptyChart height="h-96" message={precursor.rows.length === 0 ? "Not enough failures inside the telemetry window." : "No part matches these filters."} />
           ) : (
             <>
               <HeatGrid
-                rows={precursor.rows.map((r) => ({ ...r, label: `${r.label} (${r.failures})` }))}
-                cols={precursor.cols}
+                rows={prePageRows.map((r) => ({ ...r, label: `${r.label} (${r.failures})` }))}
+                cols={preCols}
                 colLabel={(c) => SHORT_SIGNAL[c.id] ?? c.id}
                 max={precursor.max}
                 rgb="225, 29, 72"
@@ -124,8 +254,8 @@ export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }
                 cellHeight="h-9"
                 gapClass="gap-0.5"
                 cellFor={(ri, ci) => {
-                  const r = precursor.rows[ri];
-                  const c = precursor.cols[ci];
+                  const r = prePageRows[ri];
+                  const c = preCols[ci];
                   const cell = precursor.cells.get(`${r.id}|${c.id}`);
                   if (cell.empty || cell.ramp === null) return { empty: true, title: `${r.label} · ${c.id}: not enough data` };
                   return {
@@ -136,7 +266,7 @@ export default function RootCauseTab({ raw, lt, summaries, loading, onOpenPart }
                   };
                 }}
               />
-              <p className="mt-2 text-[11px] text-slate-400">Row label shows failures with telemetry before them. Darker = stronger drift before failure.</p>
+              <p className="mt-2 text-[11px] text-slate-400">Row label shows failures with telemetry before them. Darker = stronger drift before failure. "Ramp ≥" keeps parts with at least one signal at or above it.</p>
             </>
           )}
         </ChartCard>

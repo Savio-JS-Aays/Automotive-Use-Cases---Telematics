@@ -1,26 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts';
+import RankedBars from "../../components/ui/RankedBars";
+
 import {
   AlertTriangle,
   Building2,
   HelpCircle,
   PackageCheck,
-  PackageX,
   Boxes,
 } from 'lucide-react';
 import KpiCard from "../../components/kpi/KpiCard"; 
+import { DataTable } from "../telematics/TelematicsUi";
 import { useSupplyChainData } from '../../hooks/useSupplyChainData'; 
 
 const nf = new Intl.NumberFormat('en-US');
@@ -119,7 +108,6 @@ export default function SupplyChainModule({ onRowClick }) {
   }
 
   // Calculate dynamic height for the scrollable chart (min 320px, +60px per location)
-  const chartHeight = Math.max(320, filteredDemandData.length * 60);
 
   return (
     <div className="space-y-6 bg-slate-50 min-h-full p-6">
@@ -190,42 +178,16 @@ export default function SupplyChainModule({ onRowClick }) {
             ) : filteredDemandData.length === 0 ? (
               <EmptyState message="No inventory for the selected filters." />
             ) : (
-              <div style={{ height: `${chartHeight}px`, width: '100%' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    layout="vertical"
-                    data={filteredDemandData}
-                    margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-                    barGap={4}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                    <XAxis
-                      type="number"
-                      tick={{ fontSize: 11, fill: '#64748b' }}
-                      tickLine={false}
-                      axisLine={{ stroke: '#e2e8f0' }}
-                    />
-                    <YAxis
-                      type="category"
-                      dataKey="location_name"
-                      tickFormatter={truncateString}
-                      tick={{ fontSize: 11, fill: '#475569' }}
-                      tickLine={false}
-                      axisLine={false}
-                      width={150}
-                    />
-                    <RechartsTooltip
-                      cursor={{ fill: '#f8fafc' }}
-                      formatter={(v) => nf.format(v)}
-                      labelFormatter={(label) => label} 
-                      contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 12, paddingBottom: '10px' }} verticalAlign="top" />
-                    <Bar dataKey="totalStock" name="On-Hand Stock" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={12} />
-                    <Bar dataKey="totalDemand" name="Projected Demand" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={12} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <RankedBars
+                rows={filteredDemandData}
+                getLabel={(r) => r.location_name}
+                grouped
+                segments={[
+                  { key: "totalStock", color: "#0ea5e9", name: "On-Hand Stock" },
+                  { key: "totalDemand", color: "#ef4444", name: "Projected Demand" },
+                ]}
+                formatValue={(r) => `${nf.format(r.totalStock)} / ${nf.format(r.totalDemand)}`}
+              />
             )}
           </div>
         </div>
@@ -241,115 +203,50 @@ export default function SupplyChainModule({ onRowClick }) {
             ) : regionWiseUrgency?.length === 0 ? (
               <EmptyState message="No regional data available." />
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  layout="vertical"
-                  data={regionWiseUrgency}
-                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-                  barSize={24}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    tickLine={false}
-                    axisLine={{ stroke: '#e2e8f0' }}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="regionId"
-                    tick={{ fontSize: 11, fill: '#475569' }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={90}
-                  />
-                  <RechartsTooltip 
-                    cursor={{ fill: '#f8fafc' }} 
-                    formatter={(v, n) => [`${nf.format(v)} SKUs`, n]}
-                    contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} 
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12, paddingBottom: '10px' }} verticalAlign="top" />
-                  <Bar dataKey="Critical" stackId="a" fill="#ef4444" name="Critical Stockout" />
-                  <Bar dataKey="Reorder" stackId="a" fill="#f59e0b" name="Reorder Recommended" />
-                  <Bar dataKey="Healthy" stackId="a" fill="#10b981" name="Healthy" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <RankedBars
+                rows={regionWiseUrgency}
+                getLabel={(r) => r.regionId}
+                segments={[
+                  { key: "Critical", color: "#ef4444", name: "Critical Stockout" },
+                  { key: "Reorder", color: "#f59e0b", name: "Reorder Recommended" },
+                  { key: "Healthy", color: "#10b981", name: "Healthy" },
+                ]}
+                formatValue={(r) => `${nf.format(r.Critical + r.Reorder + r.Healthy)} SKUs`}
+                renderDetail={(r) => `Critical ${nf.format(r.Critical)} · Reorder ${nf.format(r.Reorder)} · Healthy ${nf.format(r.Healthy)} SKUs`}
+              />
             )}
           </div>
         </div>
       </div>
 
       {/* Section C: Reorder & Allocation Master Table */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <PackageX className="h-4 w-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-800">
-            Reorder &amp; Allocation Master
-          </h3>
-          <span className="text-xs text-slate-400">
-            {loading ? '' : `${nf.format(tableData?.length || 0)} SKUs`}
-          </span>
-        </div>
-
-        <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-100">
-          <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-slate-50">
-              <tr className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                <th className="px-5 py-3 border-b border-slate-200">Part Name</th>
-                <th className="px-5 py-3 border-b border-slate-200">Depot</th>
-                <th className="px-5 py-3 border-b border-slate-200 text-right">On-Hand Stock</th>
-                <th className="px-5 py-3 border-b border-slate-200 text-right">90D Demand</th>
-                <th className="px-5 py-3 border-b border-slate-200 text-right">Reorder Qty</th>
-                <th className="px-5 py-3 border-b border-slate-200">Urgency Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
-                    Loading…
-                  </td>
-                </tr>
-              ) : tableData?.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
-                    No inventory records for the selected region.
-                  </td>
-                </tr>
-              ) : (
-                tableData?.map((row) => (
-                  <tr
-                    key={row.id}
-                    onClick={() => onRowClick?.(row)}
-                    className="cursor-pointer transition-colors hover:bg-sky-50 group"
-                  >
-                    <td className="px-5 py-4 font-medium text-slate-800 group-hover:text-sky-700">
-                      {row.partName}
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">{row.locationName}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-700">
-                      {nf.format(row.quantity)}
-                    </td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-700">
-                      {nf.format(row.demand)}
-                    </td>
-                    <td className="px-5 py-4 text-right tabular-nums font-semibold text-slate-900">
-                      {nf.format(row.reorderQty)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${PILL_STYLES[row.urgency]}`}
-                      >
-                        {row.urgency}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        title="Reorder & Allocation Master"
+        subtitle="Stock, projected demand and reorder quantity per part and depot"
+        tooltip="One row per part × depot: on-hand stock, projected 90-day demand, the recommended reorder quantity and the urgency status. Click a row to filter the charts above to that part."
+        loading={loading}
+        rows={tableData ?? []}
+        rowKey={(r) => r.id}
+        onRowClick={onRowClick ? (r) => onRowClick(r) : undefined}
+        emptyMessage="No inventory records for the selected region."
+        searchPlaceholder="Search part or depot…"
+        searchText={(r) => `${r.partName} ${r.locationName}`}
+        csvName="reorder-allocation.csv"
+        columns={[
+          { key: "part", label: "Part Name", sortValue: (r) => r.partName, csv: (r) => r.partName, render: (r) => r.partName },
+          { key: "depot", label: "Depot", sortValue: (r) => r.locationName, csv: (r) => r.locationName, render: (r) => r.locationName },
+          { key: "stock", label: "On-Hand Stock", align: "right", sortValue: (r) => r.quantity, csv: (r) => r.quantity, render: (r) => nf.format(r.quantity) },
+          { key: "demand", label: "90D Demand", align: "right", sortValue: (r) => r.demand, csv: (r) => r.demand, render: (r) => nf.format(r.demand) },
+          { key: "reorder", label: "Reorder Qty", align: "right", sortValue: (r) => r.reorderQty, csv: (r) => r.reorderQty, className: "font-semibold text-slate-900", render: (r) => nf.format(r.reorderQty) },
+          {
+            key: "urgency",
+            label: "Urgency Status",
+            sortValue: (r) => r.urgency,
+            csv: (r) => r.urgency,
+            render: (r) => <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${PILL_STYLES[r.urgency]}`}>{r.urgency}</span>,
+          },
+        ]}
+      />
     </div>
   );
 }

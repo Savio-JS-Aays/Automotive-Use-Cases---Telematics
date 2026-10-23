@@ -116,14 +116,7 @@ function TopNavigation() {
     <header className="h-16 shrink-0 bg-[#0b1220] text-slate-300 flex items-center justify-between px-6 z-20">
       <div className="flex items-center gap-8">
         {/* Logo area */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sky-500/10 text-sky-400">
-            <Activity className="h-5 w-5" strokeWidth={2} />
-          </div>
-          <div className="leading-tight">
-            <p className="text-base font-semibold text-white">Fleet Pulse</p>
-          </div>
-        </div>
+        <p className="text-base font-bold tracking-[0.18em] text-white">TELEMATICS</p>
 
         {/* Navigation */}
         <nav className="flex items-center gap-1">

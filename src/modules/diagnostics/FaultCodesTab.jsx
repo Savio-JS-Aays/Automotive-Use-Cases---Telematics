@@ -1,14 +1,13 @@
 import React, { useMemo, useRef, useState } from "react";
+import RankedBars from "../../components/ui/RankedBars";
+import Modal from "../../components/ui/Modal";
 import { useNavigate } from "react-router-dom";
 import { AlertOctagon, Gauge, Siren, Timer } from "lucide-react";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
-  LabelList,
   Legend,
   ResponsiveContainer,
   Scatter,
@@ -30,15 +29,18 @@ import {
   faultKpis,
   lifecycleFunnel,
   systemLabel,
+  systemMatrixCell,
   systemModelMatrix,
   topFaults,
 } from "./diagnosticsMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatNumber, formatPct, truncateString } from "../telematics/telematicsFormat";
-import { ChartCard, ChartSkeleton, DataTable, EmptyChart, FilterChips, HeatGrid, Segmented, SingleLineTick } from "../telematics/TelematicsUi";
+import { ChartCard, ChartSkeleton, DataTable, EmptyChart, FilterChips, HeatGrid, LocalSelect, Segmented } from "../telematics/TelematicsUi";
 import { ActionPill, LampPill, SeverityPill } from "./diagnosticsUi";
 import DtcCodePanel from "./DtcCodePanel";
 
-const EMPTY_CROSS = { modelId: null, system: null, dtcId: null };
+const EMPTY_CROSS = { modelId: null, regionId: null, application: null, system: null, dtcId: null };
+// Matrix row dimension → the table cross-filter key a cell click sets.
+const MATRIX_BY = { model: { label: "Model", cross: "modelId" }, region: { label: "Region", cross: "regionId" }, application: { label: "Application", cross: "application" } };
 
 // Charts hidden from the dashboard on request (2026-10-01); flip to true to restore.
 const SHOW = { rateTrend: false, lifecycle: false, conditions: false };
@@ -65,8 +67,27 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
 
   const kpis = useMemo(() => faultKpis(raw), [raw]);
   const trend = useMemo(() => dtcRateTrend(raw), [raw]);
-  const faults = useMemo(() => topFaults(raw, { scope: faultScope }), [raw, faultScope]);
-  const matrix = useMemo(() => systemModelMatrix(raw), [raw]);
+  const faults = useMemo(() => topFaults(raw, { scope: faultScope, limit: 30 }), [raw, faultScope]);
+  const [matrixBy, setMatrixBy] = useState("model");
+  const [matrixScope, setMatrixScope] = useState("period");
+  const [matrixSeverity, setMatrixSeverity] = useState("all");
+  const [matrixLamp, setMatrixLamp] = useState("all");
+  const matrixOpts = useMemo(
+    () => ({ by: matrixBy, scope: matrixScope, severity: matrixSeverity, lamp: matrixLamp }),
+    [matrixBy, matrixScope, matrixSeverity, matrixLamp]
+  );
+  const matrix = useMemo(() => systemModelMatrix(raw, matrixOpts), [raw, matrixOpts]);
+  const [cellDrill, setCellDrill] = useState(null); // { groupId, groupLabel, system, systemLabel }
+  const [cellSearch, setCellSearch] = useState("");
+  const cellData = useMemo(
+    () => (cellDrill ? systemMatrixCell(raw, matrixOpts, cellDrill.groupId, cellDrill.system) : null),
+    [raw, matrixOpts, cellDrill]
+  );
+  const cellEvents = useMemo(() => {
+    if (!cellData) return [];
+    const q = cellSearch.trim().toLowerCase();
+    return q ? cellData.events.filter((e) => `${e.vin ?? ""} ${e.vehicleId} ${e.dtcId} ${e.name}`.toLowerCase().includes(q)) : cellData.events;
+  }, [cellData, cellSearch]);
   const funnel = useMemo(() => lifecycleFunnel(raw), [raw]);
   const conditions = useMemo(() => faultConditions(raw), [raw]);
   const activeRows = useMemo(() => activeDtcRows(raw), [raw]);
@@ -75,7 +96,12 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
   const tableRows = useMemo(
     () =>
       activeRows.filter(
-        (r) => (!cross.modelId || r.modelId === cross.modelId) && (!cross.system || r.system === cross.system) && (!cross.dtcId || r.dtcId === cross.dtcId)
+        (r) =>
+          (!cross.modelId || r.modelId === cross.modelId) &&
+          (!cross.regionId || r.regionId === cross.regionId) &&
+          (!cross.application || r.application === cross.application) &&
+          (!cross.system || r.system === cross.system) &&
+          (!cross.dtcId || r.dtcId === cross.dtcId)
       ),
     [activeRows, cross]
   );
@@ -86,7 +112,9 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
   };
 
   const chips = [
-    cross.modelId && { key: "modelId", label: `Model: ${matrix.rows.find((r) => r.id === cross.modelId)?.label ?? cross.modelId}` },
+    cross.modelId && { key: "modelId", label: `Model: ${raw.vehicles.find((v) => v.model_id === cross.modelId)?.model_label ?? cross.modelId}` },
+    cross.regionId && { key: "regionId", label: `Region: ${raw.vehicles.find((v) => v.region_id === cross.regionId)?.region_name ?? cross.regionId}` },
+    cross.application && { key: "application", label: `Application: ${cross.application}` },
     cross.system && { key: "system", label: `System: ${systemLabel(cross.system)}` },
     cross.dtcId && { key: "dtcId", label: `Code: ${cross.dtcId}` },
   ].filter(Boolean);
@@ -193,39 +221,18 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
                 <span className="font-semibold text-slate-800">{faults.rows[0].name}</span> is the most widespread fault:{" "}
                 {faults.rows[0].trucks} of {faults.fleetTrucks} trucks with a fault.
               </p>
-              <ResponsiveContainer width="100%" height={Math.max(220, faults.rows.length * 32 + 30)}>
-                <BarChart layout="vertical" data={faults.rows} margin={{ left: 8, right: 36 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                  <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                  <YAxis type="category" dataKey="name" width={210} interval={0} tick={<SingleLineTick max={32} />} axisLine={AXIS_LINE} tickLine={false} />
-                  <RechartsTooltip
-                    cursor={{ fill: "#f8fafc" }}
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const f = payload[0].payload;
-                      return (
-                        <div className="rounded-lg bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-slate-200">
-                          <p className="font-semibold text-slate-700">{f.name}</p>
-                          <p className="text-[11px] text-slate-400">
-                            {f.dtcId} · {systemLabel(f.system)}
-                          </p>
-                          <p className="mt-1 text-slate-600">
-                            {f.trucks} {f.trucks === 1 ? "truck" : "trucks"} · raised {f.count} {f.count === 1 ? "time" : "times"} · {f.active} active now
-                          </p>
-                          <p className="text-slate-500">{LAMP_MEANING[f.lamp] ?? f.lamp}</p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Bar dataKey="trucks" name="Trucks" radius={[0, 3, 3, 0]} onClick={(d) => setPanelCode(d.dtcId ?? d.payload?.dtcId)} className="cursor-pointer">
-                    {faults.rows.map((r) => (
-                      <Cell key={r.dtcId} fill={FAULT_TONES[r.tone].color} />
-                    ))}
-                    <LabelList dataKey="trucks" position="right" style={{ fontSize: 11, fill: "#64748b" }} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+              <div className="max-h-[22rem] overflow-y-auto pr-1">
+              <RankedBars
+                rows={faults.rows}
+                getLabel={(r) => r.name}
+                valueKey="trucks"
+                getColor={(r) => FAULT_TONES[r.tone].color}
+                formatValue={(r) => `${r.trucks} ${r.trucks === 1 ? "truck" : "trucks"}`}
+                renderDetail={(f) => `${f.dtcId} · ${systemLabel(f.system)} · raised ${f.count} ${f.count === 1 ? "time" : "times"} · ${f.active} active now · ${LAMP_MEANING[f.lamp] ?? f.lamp}`}
+                onRowClick={(r) => setPanelCode(r.dtcId)}
+              />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
                 {Object.values(FAULT_TONES).map((tone) => (
                   <span key={tone.label} className="inline-flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: tone.color }} />
@@ -242,14 +249,41 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
 
         <ChartCard
           className="xl:col-span-3"
-          title="Faults by System × Model"
-          badge="PERIOD"
+          title={`Faults by System × ${MATRIX_BY[matrixBy].label}`}
+          badge={matrixScope === "active" ? "NOW" : "PERIOD"}
+          actions={
+            <>
+              <Segmented size="xs" value={matrixBy} onChange={setMatrixBy} options={Object.entries(MATRIX_BY).map(([value, d]) => ({ value, label: d.label }))} />
+              <Segmented size="xs" value={matrixScope} onChange={setMatrixScope} options={[{ value: "period", label: "New in period" }, { value: "active", label: "Active now" }]} />
+              <LocalSelect
+                label=""
+                value={matrixSeverity}
+                onChange={setMatrixSeverity}
+                options={[
+                  { value: "all", label: "All severities" },
+                  { value: "critical", label: "Critical" },
+                  { value: "major", label: "Major" },
+                  { value: "minor", label: "Minor" },
+                ]}
+              />
+              <LocalSelect
+                label=""
+                value={matrixLamp}
+                onChange={setMatrixLamp}
+                options={[
+                  { value: "all", label: "All lamps" },
+                  { value: "red", label: "Red (stop / protect)" },
+                  { value: "amber", label: "Amber (warning / MIL)" },
+                ]}
+              />
+            </>
+          }
           tooltip="New non-intermittent fault codes per 100 trucks of each model, by vehicle system. Normalising by model size shows whether a model has a systematic weakness (a quality engineering signal), not just more trucks. Click a cell to filter the active fault list."
         >
           {loading ? (
             <ChartSkeleton height="h-80" />
           ) : matrix.cols.length === 0 ? (
-            <EmptyChart height="h-80" message="No fault codes first seen in this period." />
+            <EmptyChart height="h-80" message="No fault codes match these filters." />
           ) : (
             <>
               <HeatGrid
@@ -268,13 +302,17 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
                     display: cell.count ? formatNumber(cell.per100, 1) : "·",
                     sub: cell.count ? `${cell.count}` : undefined,
                     muted: cell.muted,
-                    selected: cross.modelId === r.id && cross.system === c.id,
                     title: `${r.label} · ${c.label}: ${cell.count} codes on ${r.trucks} trucks (${cell.per100.toFixed(1)} per 100 trucks)${cell.muted ? " · fewer than 5 trucks" : ""}`,
-                    onClick: cell.count ? () => applyCross({ modelId: r.id, system: c.id }) : undefined,
+                    onClick: cell.count
+                      ? () => {
+                          setCellDrill({ groupId: r.id, groupLabel: r.label, system: c.id, systemLabel: c.label });
+                          setCellSearch("");
+                        }
+                      : undefined,
                   };
                 }}
               />
-              <p className="mt-2 text-[11px] text-slate-400">Cell = codes per 100 trucks (small number = count). Models with fewer than 5 trucks in scope are greyed.</p>
+              <p className="mt-2 text-[11px] text-slate-400">Cell = codes per 100 trucks of that {MATRIX_BY[matrixBy].label.toLowerCase()} (small number = count). Groups with fewer than 5 trucks in scope are greyed. Click a cell for its fault codes and trucks.</p>
             </>
           )}
         </ChartCard>
@@ -322,20 +360,13 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
           ) : funnel[0].count === 0 ? (
             <EmptyChart message="No fault codes first seen in this period." />
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart layout="vertical" data={funnel} margin={{ left: 8, right: 48 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="stage" width={130} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip formatter={(v, _n, item) => [`${v} (${item.payload.pct.toFixed(0)}%)`, "Codes"]} />
-                <Bar dataKey="count" radius={[0, 3, 3, 0]}>
-                  {funnel.map((s) => (
-                    <Cell key={s.stage} fill={s.color} />
-                  ))}
-                  <LabelList dataKey="pct" position="right" formatter={(v) => `${Number(v).toFixed(0)}%`} style={{ fontSize: 11, fill: "#64748b" }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <RankedBars
+              rows={funnel}
+              getLabel={(r) => r.stage}
+              valueKey="count"
+              getColor={(r) => r.color}
+              formatValue={(r) => `${r.count} · ${r.pct.toFixed(0)}%`}
+            />
           )}
         </ChartCard>
         )}
@@ -404,6 +435,98 @@ export default function FaultCodesTab({ raw, loading, onOpenAsset }) {
           }}
         />
       )}
+
+      <Modal
+        open={Boolean(cellDrill)}
+        onClose={() => setCellDrill(null)}
+        widthClass="max-w-4xl"
+        title={cellDrill ? `${cellDrill.groupLabel} · ${cellDrill.systemLabel}` : ""}
+        subtitle={
+          cellData
+            ? `${cellData.events.length} fault ${cellData.events.length === 1 ? "event" : "events"} on ${cellData.trucks} ${cellData.trucks === 1 ? "truck" : "trucks"} · ${
+                matrixScope === "active" ? "active now" : "new in the period"
+              }${matrixSeverity !== "all" ? ` · ${matrixSeverity}` : ""}${matrixLamp !== "all" ? ` · ${matrixLamp} lamp` : ""}`
+            : ""
+        }
+        actions={
+          <input
+            type="search"
+            value={cellSearch}
+            onChange={(e) => setCellSearch(e.target.value)}
+            placeholder="Search VIN, vehicle or code"
+            className="w-52 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
+          />
+        }
+      >
+        {cellData && (
+          <div className="space-y-6">
+            <div>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Fault codes · click one for its detail</p>
+              <RankedBars
+                rows={cellData.codes}
+                getLabel={(r) => `${r.name} · ${r.dtcId}`}
+                valueKey="count"
+                getColor={(r) => FAULT_TONES[r.tone].color}
+                formatValue={(r) => `${r.count} on ${r.trucks} ${r.trucks === 1 ? "truck" : "trucks"}`}
+                onRowClick={(r) => {
+                  setCellDrill(null);
+                  setPanelCode(r.dtcId);
+                }}
+              />
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Events{cellEvents.length !== cellData.events.length ? ` · ${cellEvents.length} of ${cellData.events.length}` : ""} · click a row to open the truck
+              </p>
+              {cellEvents.length === 0 ? (
+                <p className="text-sm text-slate-400">No event matches that search.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Truck</th>
+                        <th className="px-3 py-2 font-semibold">Fault</th>
+                        <th className="px-3 py-2 font-semibold">Lamp</th>
+                        <th className="px-3 py-2 font-semibold">Severity</th>
+                        <th className="px-3 py-2 font-semibold">First seen</th>
+                        <th className="px-3 py-2 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {cellEvents.map((e) => (
+                        <tr
+                          key={e.id}
+                          onClick={() => {
+                            setCellDrill(null);
+                            onOpenAsset(e.vehicleId);
+                          }}
+                          className="cursor-pointer hover:bg-sky-50"
+                        >
+                          <td className="px-3 py-2">
+                            <p className="font-medium text-slate-700">{e.vin ?? e.vehicleId}</p>
+                            <p className="text-[11px] text-slate-400">
+                              {e.modelLabel} · {e.regionName}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2">
+                            <p className="text-slate-700">{e.name}</p>
+                            <p className="text-[11px] text-slate-400">{e.dtcId}</p>
+                          </td>
+                          <td className="px-3 py-2"><LampPill lamp={e.lamp} /></td>
+                          <td className="px-3 py-2"><SeverityPill severity={e.severity} /></td>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-600">{e.firstSeen ? formatDay(e.firstSeen.slice(0, 10)) : "—"}</td>
+                          <td className="px-3 py-2 text-slate-600">{e.status === "previously_active" ? "self-cleared" : e.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

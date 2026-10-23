@@ -1,14 +1,16 @@
 import React, { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Download, Search, X } from "lucide-react";
 import ChartHeader from "../../components/ui/ChartHeader";
+import Hover from "../../components/ui/Hover";
+import { TABLE_COUNT, TABLE_FIRST_TD, TABLE_FRAME, TABLE_ROW, TABLE_SEARCH, TABLE_TD, TABLE_TH } from "../../components/ui/tableStyle";
 import { downloadCsv, truncateString } from "./telematicsFormat";
 
-export function ChartCard({ title, tooltip, badge, actions, className = "", children }) {
+export function ChartCard({ title, subtitle, tooltip, badge, actions, className = "", children }) {
   return (
     <div className={`rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ${className}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex items-start gap-2">
-          <ChartHeader title={title} tooltip={tooltip} />
+          <ChartHeader title={title} subtitle={subtitle} tooltip={tooltip} />
           {badge && (
             <span
               className={`mt-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${
@@ -19,7 +21,7 @@ export function ChartCard({ title, tooltip, badge, actions, className = "", chil
             </span>
           )}
         </div>
-        {actions && <div className="mb-3 flex flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="mb-5 flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
       {children}
     </div>
@@ -134,7 +136,10 @@ export function HeatGrid({
   onColClick,
   sortId,
   sortDir,
+  totals,
 }) {
+  // totals = { rowLabel, colLabel, row(ri), col(ci), grand }: each returns { display, sub, title, onClick };
+  // adds an "All …" column on the right and an "All …" row at the bottom, in neutral grey.
   // scrollClass (e.g. "max-h-[32rem]") makes the grid scroll vertically with a sticky header row;
   // onColClick makes the column headers sortable buttons (sortId / sortDir mark the active one).
   const headCell = scrollClass ? "sticky top-0 z-10 bg-white" : "";
@@ -142,7 +147,7 @@ export function HeatGrid({
     <div className={scrollClass ? `overflow-auto ${scrollClass}` : "overflow-x-auto"}>
       <div
         className={`grid ${gapClass} text-xs`}
-        style={{ gridTemplateColumns: `minmax(${rowLabelWidth}px, auto) repeat(${cols.length}, minmax(${minColWidth}px, 1fr))` }}
+        style={{ gridTemplateColumns: `minmax(${rowLabelWidth}px, auto) repeat(${cols.length + (totals ? 1 : 0)}, minmax(${minColWidth}px, 1fr))` }}
       >
         <div className={headCell} />
         {cols.map((c) => (
@@ -161,6 +166,7 @@ export function HeatGrid({
             )}
           </div>
         ))}
+        {totals && <div className={`${headCell} px-1 pb-1 text-center font-semibold leading-tight text-slate-700`}>{totals.colLabel}</div>}
         {rows.map((r, ri) => (
           <React.Fragment key={r.id}>
             <div className="flex items-center pr-2 font-medium text-slate-600" title={r.label}>
@@ -168,16 +174,16 @@ export function HeatGrid({
             </div>
             {cols.map((c, ci) => {
               const cell = cellFor(ri, ci);
-              if (cell.empty) return <div key={c.id} className={`${cellHeight} rounded bg-slate-50`} title={cell.title} />;
+              if (cell.empty) return <Hover key={c.id} className={`${cellHeight} rounded bg-slate-50`} content={cell.title} />;
               const alpha = cell.muted || !max ? 0 : 0.08 + Math.min((cell.value ?? 0) / max, 1) * 0.82;
               const dark = alpha > 0.5;
-              const Tag = cell.onClick ? "button" : "div";
               return (
-                <Tag
+                <Hover
+                  as={cell.onClick ? "button" : "div"}
                   key={c.id}
                   type={cell.onClick ? "button" : undefined}
                   onClick={cell.onClick}
-                  title={cell.title}
+                  content={cell.title}
                   className={`flex ${cellHeight} flex-col items-center justify-center rounded ${
                     cell.onClick ? "transition-transform hover:scale-[1.04]" : ""
                   } ${cell.muted ? "bg-slate-100 text-slate-400" : dark ? "text-white" : "text-slate-700"} ${
@@ -187,13 +193,44 @@ export function HeatGrid({
                 >
                   <span className="text-sm font-semibold">{cell.display}</span>
                   {cell.sub !== undefined && <span className="text-[10px] opacity-80">{cell.sub}</span>}
-                </Tag>
+                </Hover>
               );
             })}
+            {totals && <TotalCell cell={totals.row(ri)} cellHeight={cellHeight} />}
           </React.Fragment>
         ))}
+        {totals && (
+          <>
+            <div className="flex items-center border-t border-slate-200 pr-2 pt-1 font-semibold text-slate-700">{totals.rowLabel}</div>
+            {cols.map((c, ci) => (
+              <div key={c.id} className="border-t border-slate-200 pt-1">
+                <TotalCell cell={totals.col(ci)} cellHeight={cellHeight} />
+              </div>
+            ))}
+            <div className="border-t border-slate-200 pt-1">
+              <TotalCell cell={totals.grand} cellHeight={cellHeight} strong />
+            </div>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+function TotalCell({ cell, cellHeight, strong = false }) {
+  return (
+    <Hover
+      as={cell.onClick ? "button" : "div"}
+      type={cell.onClick ? "button" : undefined}
+      onClick={cell.onClick}
+      content={cell.title}
+      className={`flex w-full ${cellHeight} flex-col items-center justify-center rounded ${strong ? "bg-sky-50 text-sky-700" : "bg-slate-50 text-slate-800"} ${
+        cell.onClick ? "transition-colors hover:bg-slate-100" : ""
+      }`}
+    >
+      <span className="text-sm font-bold">{cell.display}</span>
+      {cell.sub !== undefined && <span className="text-[10px] text-slate-500">{cell.sub}</span>}
+    </Hover>
   );
 }
 
@@ -203,6 +240,7 @@ export function HeatGrid({
  */
 export function DataTable({
   title,
+  subtitle,
   tooltip,
   columns,
   rows,
@@ -246,66 +284,63 @@ export function DataTable({
   };
 
   return (
-    <div ref={tableRef} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="space-y-3 border-b border-slate-100 px-5 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <ChartHeader title={title} tooltip={tooltip} />
-          <div className="flex items-center gap-2">
-            {searchText && (
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={searchPlaceholder}
-                  className="w-56 rounded-md border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-3 text-sm text-slate-700 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
-                />
-              </div>
-            )}
-            {csvName && (
-              <button
-                type="button"
-                onClick={() => downloadCsv(csvName, columns.filter((c) => c.csv), visible)}
-                disabled={loading || visible.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-              >
-                <Download className="h-3.5 w-3.5" />
-                CSV
-              </button>
-            )}
+    <div ref={tableRef} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <ChartHeader title={title} subtitle={subtitle} tooltip={tooltip} />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {searchText ? (
+          <div className="relative w-full max-w-md">
+            <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={searchPlaceholder} className={TABLE_SEARCH} />
           </div>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-3">
+          {!loading && (
+            <span className={TABLE_COUNT}>
+              Showing {visible.length.toLocaleString("en-IN")} of {rows.length.toLocaleString("en-IN")} records
+            </span>
+          )}
+          {csvName && (
+            <button
+              type="button"
+              onClick={() => downloadCsv(csvName, columns.filter((c) => c.csv), visible)}
+              disabled={loading || visible.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+            >
+              <Download className="h-3.5 w-3.5" />
+              CSV
+            </button>
+          )}
         </div>
-        {toolbar}
       </div>
+      {toolbar && <div className="mb-4">{toolbar}</div>}
 
-      <div className={`${maxHeight} overflow-auto`}>
-        <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-slate-50">
+      <div className={`${maxHeight} ${TABLE_FRAME}`}>
+        <table className="w-full text-left">
+          <thead className="sticky top-0 z-10">
             <tr>
               {columns.map((col) => (
                 <th
                   key={col.key}
                   onClick={() => toggleSort(col)}
-                  className={`whitespace-nowrap border-b border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-400 ${
-                    col.sortValue ? "cursor-pointer select-none hover:text-slate-600" : ""
-                  } ${col.align === "right" ? "text-right" : ""}`}
+                  className={`${TABLE_TH} ${col.sortValue ? "cursor-pointer select-none hover:text-slate-900" : ""} ${col.align === "right" ? "text-right" : ""}`}
                 >
-                  <span className="inline-flex items-center gap-1">
+                  <span className={`inline-flex items-center gap-1 ${col.align === "right" ? "justify-end" : ""}`}>
                     {col.label}
-                    {sort?.key === col.key &&
-                      (sort.dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+                    {sort?.key === col.key && (sort.dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
                   </span>
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody>
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}>
+                <tr key={i} className={TABLE_ROW}>
                   {columns.map((col) => (
-                    <td key={col.key} className="px-4 py-4">
-                      <div className="h-4 w-full animate-pulse rounded bg-slate-50" />
+                    <td key={col.key} className={TABLE_TD}>
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
                     </td>
                   ))}
                 </tr>
@@ -321,12 +356,12 @@ export function DataTable({
                 <tr
                   key={rowKey(row)}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={`group align-top transition-colors ${onRowClick ? "cursor-pointer hover:bg-sky-50" : ""}`}
+                  className={`group ${TABLE_ROW} ${onRowClick ? "cursor-pointer hover:bg-sky-50" : ""}`}
                 >
-                  {columns.map((col) => (
+                  {columns.map((col, ci) => (
                     <td
                       key={col.key}
-                      className={`px-4 py-3 ${col.align === "right" ? "text-right tabular-nums" : ""} ${col.className ?? "text-slate-600"}`}
+                      className={`${TABLE_TD} ${col.align === "right" ? "text-right tabular-nums" : ""} ${col.className ?? (ci === 0 ? TABLE_FIRST_TD : "")}`}
                     >
                       {col.render(row)}
                     </td>
@@ -337,11 +372,6 @@ export function DataTable({
           </tbody>
         </table>
       </div>
-      {!loading && visible.length > 0 && (
-        <div className="border-t border-slate-100 px-5 py-2 text-[11px] text-slate-400">
-          {visible.length} of {rows.length} rows
-        </div>
-      )}
     </div>
   );
 }

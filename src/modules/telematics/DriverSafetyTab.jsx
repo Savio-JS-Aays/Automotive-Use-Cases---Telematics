@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
+
+import RankedBars from "../../components/ui/RankedBars";
+import Modal from "../../components/ui/Modal";
 import { AlertTriangle, ScanEye, ShieldCheck, Siren } from "lucide-react";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   Legend,
@@ -22,19 +23,19 @@ import {
   EMPTY_EVENT_FILTER,
   EVENT_FAMILIES,
   EVENT_LABELS,
-  MATRIX_MIN_TRUCKS,
   SAFETY_BANDS,
   SPEED_BANDS,
   bandOf,
   driverStats,
   eventRateTrend,
   eventSeverityMatrix,
-  safetyDistribution,
+  safetyBandsByGroup,
   safetyKpis,
   speedProfile,
+  speedProfileByVehicle,
   safetyByGroup,
 } from "./telematicsMetrics";
-import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatNumber, truncateString } from "./telematicsFormat";
+import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatNumber } from "./telematicsFormat";
 import { ChartCard, ChartSkeleton, EmptyChart, FilterChips, HeatGrid, LocalSelect, Segmented } from "./TelematicsUi";
 
 const MIN_KM_OPTIONS = [
@@ -85,19 +86,79 @@ function QuadrantTip({ active, payload }) {
 // Charts hidden from the dashboard on request (2026-10-01); flip to true to restore.
 const SHOW = { coachingQuadrant: false };
 
-export default function DriverSafetyTab({ raw, loading }) {
+export default function DriverSafetyTab({ raw, trucks = [], loading, onOpenAsset }) {
   const [filter, setFilter] = useState(EMPTY_EVENT_FILTER);
   const [minKm, setMinKm] = useState("500");
   const [groupBy, setGroupBy] = useState("model");
   const [profileGroup, setProfileGroup] = useState("application");
+  const [speedDrill, setSpeedDrill] = useState(null); // { group, band }
+  const [drillSearch, setDrillSearch] = useState("");
+  const [safetyDrill, setSafetyDrill] = useState(null); // { id, label, band }
+  const [safetySearch, setSafetySearch] = useState("");
 
-  const kpis = useMemo(() => safetyKpis(raw, filter), [raw, filter]);
-  const trend = useMemo(() => eventRateTrend(raw, filter), [raw, filter]);
+  const kpis = useMemo(() => safetyKpis(raw, EMPTY_EVENT_FILTER), [raw]);
+  const [trendModel, setTrendModel] = useState("all");
+  const [trendRegion, setTrendRegion] = useState("all");
+  const [trendApp, setTrendApp] = useState("all");
+  const [trendWindow, setTrendWindow] = useState("7");
+  const trendOptions = useMemo(() => {
+    const opts = (allLabel, pairs) => [
+      { value: "all", label: allLabel },
+      ...[...new Map(pairs).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]))).map(([value, label]) => ({ value, label })),
+    ];
+    return {
+      model: opts("All models", raw.vehicles.map((v) => [v.model_id, v.model_label])),
+      region: opts("All regions", raw.vehicles.map((v) => [v.region_id, v.region_name])),
+      app: opts("All applications", raw.vehicles.map((v) => [v.application_name ?? "Unknown", v.application_name ?? "Unknown"])),
+    };
+  }, [raw.vehicles]);
+  const trendVehicles = useMemo(() => {
+    if (trendModel === "all" && trendRegion === "all" && trendApp === "all") return null;
+    return new Set(
+      raw.vehicles
+        .filter(
+          (v) =>
+            (trendModel === "all" || v.model_id === trendModel) &&
+            (trendRegion === "all" || v.region_id === trendRegion) &&
+            (trendApp === "all" || (v.application_name ?? "Unknown") === trendApp)
+        )
+        .map((v) => v.vehicle_id)
+    );
+  }, [raw.vehicles, trendModel, trendRegion, trendApp]);
+  const trend = useMemo(
+    () => eventRateTrend(raw, filter, { vehicleIds: trendVehicles, windowDays: Number(trendWindow) }),
+    [raw, filter, trendVehicles, trendWindow]
+  );
   const drivers = useMemo(() => driverStats(raw, filter), [raw, filter]);
   const groups = useMemo(() => safetyByGroup(raw, filter, groupBy, Number(minKm)), [raw, filter, groupBy, minKm]);
-  const distribution = useMemo(() => safetyDistribution(drivers, Number(minKm)), [drivers, minKm]);
+  const safetyRows = useMemo(() => {
+    const events = new Map(groups.rows.map((g) => [g.id, g]));
+    return safetyBandsByGroup(trucks, groupBy, Number(minKm))
+      .map((r) => ({ ...r, ev: events.get(r.id) ?? null }))
+      .sort((a, b) => b["Coach now"] - a["Coach now"] || b.Watch - a.Watch || (b.ev?.eventsPer1000 ?? 0) - (a.ev?.eventsPer1000 ?? 0));
+  }, [trucks, groupBy, minKm, groups]);
+  const ratedTrucks = safetyRows.reduce((s, r) => s + r.rated, 0);
+  const safetyDrillRows = useMemo(() => {
+    if (!safetyDrill) return [];
+    const row = safetyRows.find((r) => r.id === safetyDrill.id);
+    const q = safetySearch.trim().toLowerCase();
+    return (row?.trucks ?? [])
+      .filter((t) => t.band === safetyDrill.band)
+      .filter((t) => !q || `${t.vin ?? ""} ${t.vehicleId} ${t.modelLabel} ${t.regionName}`.toLowerCase().includes(q))
+      .map((t) => ({ ...t, eventsPer1000: t.km > 0 ? (t.harshEvents / t.km) * 1000 : null }))
+      .sort((a, b) => a.safety - b.safety);
+  }, [safetyDrill, safetyRows, safetySearch]);
   const matrix = useMemo(() => eventSeverityMatrix(raw), [raw]);
   const profile = useMemo(() => speedProfile(raw, profileGroup), [raw, profileGroup]);
+  const drillTrucks = useMemo(
+    () => (speedDrill ? speedProfileByVehicle(raw, profileGroup, speedDrill.group, speedDrill.band) : []),
+    [raw, profileGroup, speedDrill]
+  );
+  const visibleDrill = useMemo(() => {
+    const q = drillSearch.trim().toLowerCase();
+    return q ? drillTrucks.filter((r) => `${r.vin ?? ""} ${r.vehicleId} ${r.modelLabel}`.toLowerCase().includes(q)) : drillTrucks;
+  }, [drillTrucks, drillSearch]);
+  const bandLabel = (key) => SPEED_BANDS.find((b) => b.key === key)?.label ?? key;
   const quadrant = useMemo(
     () =>
       drivers
@@ -131,28 +192,6 @@ export default function DriverSafetyTab({ raw, loading }) {
 
   return (
     <div className="space-y-4">
-      {/* Local filter bar */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Event filter</span>
-        {EVENT_FAMILIES.map((f) => (
-          <button
-            key={f.name}
-            type="button"
-            onClick={() => toggleFamily(f.name)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-              familyActive(f.name) ? "border-slate-300 bg-white text-slate-700" : "border-slate-200 bg-slate-50 text-slate-400 line-through"
-            }`}
-          >
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: f.color, opacity: familyActive(f.name) ? 1 : 0.3 }} />
-            {f.name}
-          </button>
-        ))}
-        <LocalSelect label="" value={filter.severity} onChange={(v) => setFilter((p) => ({ ...p, severity: v }))} options={SEVERITY_OPTIONS} />
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Group by</span>
-        <Segmented value={groupBy} onChange={setGroupBy} options={GROUP_OPTIONS} />
-        <LocalSelect label="Rate drivers with" value={minKm} onChange={setMinKm} options={MIN_KM_OPTIONS} />
-        <FilterChips chips={chips} onRemove={removeChip} onClear={() => setFilter(EMPTY_EVENT_FILTER)} />
-      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
@@ -176,7 +215,7 @@ export default function DriverSafetyTab({ raw, loading }) {
           iconBgClass="bg-amber-50"
           iconColorClass="text-amber-600"
           loading={loading}
-          tooltip="Events matching the event filter ÷ fleet distance × 1,000. The rate, not the count, is comparable across periods and filters."
+          tooltip="All harsh, speed, ADAS and idling events ÷ fleet distance × 1,000. The rate, not the count, is comparable across periods and filters."
         />
         <KpiCard
           title="High-Severity Events"
@@ -201,94 +240,136 @@ export default function DriverSafetyTab({ raw, loading }) {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="flex flex-wrap items-center gap-3 px-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Event filter</span>
+          <span className="text-[11px] text-slate-400">applies to these two charts</span>
+          {EVENT_FAMILIES.map((f) => (
+            <button
+              key={f.name}
+              type="button"
+              onClick={() => toggleFamily(f.name)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                familyActive(f.name) ? "border-slate-300 bg-white text-slate-700" : "border-slate-200 bg-slate-50 text-slate-400 line-through"
+              }`}
+            >
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: f.color, opacity: familyActive(f.name) ? 1 : 0.3 }} />
+              {f.name}
+            </button>
+          ))}
+          <LocalSelect label="" value={filter.severity} onChange={(v) => setFilter((p) => ({ ...p, severity: v }))} options={SEVERITY_OPTIONS} />
+          <FilterChips chips={chips} onRemove={removeChip} onClear={() => setFilter(EMPTY_EVENT_FILTER)} />
+        </div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard
+          className="flex flex-col"
           title="Event Rate by Family (per 1,000 km)"
+          subtitle={trendVehicles ? `${trendVehicles.size} trucks match the filters` : "All trucks in scope"}
+          actions={
+            <>
+              <LocalSelect label="" value={trendModel} onChange={setTrendModel} options={trendOptions.model} />
+              <LocalSelect label="" value={trendRegion} onChange={setTrendRegion} options={trendOptions.region} />
+              <LocalSelect label="" value={trendApp} onChange={setTrendApp} options={trendOptions.app} />
+              <Segmented
+                size="xs"
+                value={trendWindow}
+                onChange={setTrendWindow}
+                options={[
+                  { value: "7", label: "7-day" },
+                  { value: "1", label: "Daily" },
+                ]}
+              />
+            </>
+          }
           badge="PERIOD"
-          tooltip="7-day rolling events ÷ 7-day rolling km × 1,000, stacked by event family. Normalised by distance so busy weeks don't look riskier just because trucks drove more. A falling curve after a coaching campaign is proof it worked."
+          tooltip="Events ÷ km × 1,000 per day, stacked by event family; 7-day = rolling 7-day sums (smooths weekday swings), Daily = each day on its own. Follows the event filter above, plus this card's own model, region and application filters, which limit both the events and the km to the matching trucks. Normalised by distance so busy days don't look riskier just because trucks drove more."
         >
           {loading ? (
             <ChartSkeleton />
           ) : trend.families.length === 0 ? (
             <EmptyChart message="All event families are filtered out." />
+          ) : trendVehicles && trendVehicles.size === 0 ? (
+            <EmptyChart message="No trucks match this model, region and application." />
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
+            <div className="min-h-[260px] flex-1">
+            <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trend.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
                 <XAxis dataKey="date" tickFormatter={formatDay} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={24} />
                 <YAxis tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={36} />
-                <RechartsTooltip labelFormatter={(d) => `7 days to ${formatDay(d)}`} formatter={(v, n) => [`${v} / 1,000 km`, n]} />
+                <RechartsTooltip labelFormatter={(d) => (trendWindow === "7" ? `7 days to ${formatDay(d)}` : formatDay(d))} formatter={(v, n) => [`${v} / 1,000 km`, n]} />
                 <Legend verticalAlign="bottom" height={28} iconType="circle" wrapperStyle={LEGEND_STYLE} />
                 {trend.families.map((f) => (
                   <Area key={f.name} dataKey={f.name} stackId="e" stroke={f.color} fill={f.color} fillOpacity={0.35} />
                 ))}
               </AreaChart>
             </ResponsiveContainer>
+            </div>
           )}
         </ChartCard>
 
         <ChartCard
-          title={`Safety Risk by ${GROUP_NOUN[groupBy]} (events per 1,000 km)`}
+          title={`Safety by ${GROUP_NOUN[groupBy]}: Score Bands & Event Rate`}
+          subtitle={`${ratedTrucks} trucks rated · bar = share of trucks per safety band · right = events per 1,000 km`}
           badge="PERIOD"
-          tooltip="Harsh, speed, ADAS and idling events per 1,000 km for each group of trucks, stacked by event family, with the fleet rate as a dashed line. Groups, not individual drivers, show where risk comes from: truck model, duty cycle or region. Safety score, trucks and high-severity share are in the tooltip. Follows the event filter."
+          actions={
+            <>
+              <Segmented
+                value={groupBy}
+                onChange={(v) => {
+                  setGroupBy(v);
+                  setSafetyDrill(null);
+                }}
+                options={GROUP_OPTIONS}
+              />
+              <LocalSelect label="Rate trucks with" value={minKm} onChange={setMinKm} options={MIN_KM_OPTIONS} />
+            </>
+          }
+          tooltip="For each group: the share of its trucks in each safety band (red = coach now < 70, amber = watch 70–85, green = good ≥ 85), from each truck's distance-weighted period safety score, and on the right the events per 1,000 km. The event rate follows the event filter above; the score bands do not (scores are computed from all events). Trucks with less distance than the 'Rate trucks with' threshold are not rated. Click a band to list those trucks."
         >
           {loading ? (
             <ChartSkeleton />
-          ) : groups.rows.length === 0 ? (
-            <EmptyChart message="No distance driven in this period." />
+          ) : safetyRows.length === 0 ? (
+            <EmptyChart message="No trucks with enough distance in this period." />
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={groups.rows} layout="vertical" margin={{ left: 4, right: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="label" width={150} tickFormatter={(v) => truncateString(v, 22)} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip
-                  cursor={{ fill: "#f8fafc" }}
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const g = payload[0].payload;
-                    return (
-                      <div className="rounded-lg bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-slate-200">
-                        <p className="font-semibold text-slate-700">{g.label}</p>
-                        <p className="text-slate-600">
-                          {g.eventsPer1000 === null ? "—" : g.eventsPer1000.toFixed(1)} events / 1,000 km · safety {g.safety === null ? "—" : g.safety.toFixed(1)}
-                        </p>
-                        {groups.families.map((f) => (
-                          <p key={f.name} className="text-slate-500">
-                            <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: f.color }} />
-                            {f.name}: {g[f.name]}
-                          </p>
-                        ))}
-                        <p className="mt-1 text-slate-400">
-                          {g.trucks} trucks · {formatNumber(g.km)} km
-                          {g.highSeverityPct !== null ? ` · ${g.highSeverityPct.toFixed(0)}% high severity` : ""}
-                          {g.lowSample ? ` · fewer than ${MATRIX_MIN_TRUCKS} trucks` : ""}
-                        </p>
-                      </div>
-                    );
-                  }}
-                />
-                <Legend verticalAlign="bottom" height={28} iconType="circle" wrapperStyle={LEGEND_STYLE} />
-                {groups.fleet?.eventsPer1000 !== null && groups.fleet && (
-                  <ReferenceLine
-                    x={groups.fleet.eventsPer1000}
-                    stroke="#64748b"
-                    strokeDasharray="4 4"
-                    label={{ value: `Fleet ${groups.fleet.eventsPer1000.toFixed(1)}`, position: "insideTopRight", fontSize: 10, fill: "#64748b" }}
-                  />
-                )}
-                {groups.families.map((f, i) => (
-                  <Bar key={f.name} dataKey={f.name} stackId="g" fill={f.color} radius={i === groups.families.length - 1 ? [0, 3, 3, 0] : undefined} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+            <>
+              <RankedBars
+                rows={safetyRows}
+                getLabel={(r) => r.label}
+                segments={SAFETY_BANDS.map((b) => ({ key: b.name, color: b.color, name: b.name }))}
+                max={100}
+                formatValue={(r) => (r.ev?.eventsPer1000 == null ? "—" : `${r.ev.eventsPer1000.toFixed(1)} / 1k km`)}
+                renderDetail={(r) =>
+                  `${SAFETY_BANDS.map((b) => `${b.name}: ${r.counts[b.name]} (${r[b.name]}%)`).join(" · ")} · ${r.rated} trucks rated${
+                    r.ev
+                      ? ` · ${r.ev.eventsPer1000 === null ? "—" : r.ev.eventsPer1000.toFixed(1)} events / 1,000 km (${groups.families.map((f) => `${f.name} ${r.ev[f.name]}`).join(", ")}) · group safety ${r.ev.safety === null ? "—" : r.ev.safety.toFixed(1)}`
+                      : ""
+                  } · click a band for the trucks`
+                }
+                onSegmentClick={(r, band) => {
+                  setSafetyDrill({ id: r.id, label: r.label, band });
+                  setSafetySearch("");
+                }}
+                onRowClick={(r) => {
+                  setSafetyDrill({ id: r.id, label: r.label, band: safetyDrill?.band ?? "Coach now" });
+                  setSafetySearch("");
+                }}
+              />
+              {groups.fleet?.eventsPer1000 != null && (
+                <p className="mt-3 text-[11px] text-slate-400">Fleet: {groups.fleet.eventsPer1000.toFixed(1)} events per 1,000 km.</p>
+              )}
+            </>
           )}
         </ChartCard>
 
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard
           title="Event Type × Severity"
           badge="PERIOD"
-          tooltip="Count of events for every type and severity in the period. Shows where the real risk sits, e.g. many low-severity idle events versus a few high-severity harsh brakes. Click a cell to filter the whole tab to that type and severity."
+          tooltip="Count of events for every type and severity in the period. Shows where the real risk sits, e.g. many low-severity idle events versus a few high-severity harsh brakes. Click a cell to set the event filter (Event Rate by Family and the event rate in Safety by Group) to that type and severity."
         >
           {loading ? (
             <ChartSkeleton />
@@ -315,30 +396,6 @@ export default function DriverSafetyTab({ raw, loading }) {
                 };
               }}
             />
-          )}
-        </ChartCard>
-
-        <ChartCard
-          title="Driver Safety Score Distribution"
-          badge="PERIOD"
-          tooltip={`How many drivers (with ${Number(minKm).toLocaleString("en-IN")} km or more) fall in each safety-score band. Red = coach now (< 70), amber = watch (70–85), green = good (≥ 85). A count per band, with no names: it shows how much of the driver pool needs coaching.`}
-        >
-          {loading ? (
-            <ChartSkeleton />
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={distribution}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                <XAxis dataKey="label" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} interval={0} />
-                <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={28} />
-                <RechartsTooltip cursor={{ fill: "#f8fafc" }} formatter={(v, _n, item) => [`${v} drivers`, item.payload.band]} />
-                <Bar dataKey="drivers" radius={[3, 3, 0, 0]}>
-                  {distribution.map((b) => (
-                    <Cell key={b.label} fill={b.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
           )}
         </ChartCard>
 
@@ -374,12 +431,22 @@ export default function DriverSafetyTab({ raw, loading }) {
         )}
 
         <ChartCard
-          className={SHOW.coachingQuadrant ? "" : "xl:col-span-2"}
           title="Time in Speed Bands"
           badge="PERIOD"
           tooltip="Share of driving time in each rFMS speed class, from the trucks' accumulated-data histograms. Time above 80 km/h (red) is over the governed limit for Indian heavy trucks: a safety and fuel issue."
           actions={
-            <Segmented value={profileGroup} onChange={setProfileGroup} options={[{ value: "application", label: "By application" }, { value: "model", label: "By model" }]} />
+            <Segmented
+              value={profileGroup}
+              onChange={(v) => {
+                setProfileGroup(v);
+                setSpeedDrill(null);
+              }}
+              options={[
+                { value: "application", label: "By application" },
+                { value: "model", label: "By model" },
+                { value: "vehicleType", label: "By vehicle type" },
+              ]}
+            />
           }
         >
           {loading ? (
@@ -387,27 +454,96 @@ export default function DriverSafetyTab({ raw, loading }) {
           ) : profile.length === 0 ? (
             <EmptyChart message="No trips in this period." />
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={profile} layout="vertical" margin={{ left: 4, right: 12 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" unit="%" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} allowDataOverflow tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="name" width={130} tickFormatter={(v) => truncateString(v, 20)} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip cursor={{ fill: "#f8fafc" }} formatter={(v, n) => [`${v}%`, SPEED_BANDS.find((b) => b.key === n)?.label ?? n]} />
-                <Legend
-                  verticalAlign="bottom"
-                  height={28}
-                  iconType="circle"
-                  wrapperStyle={LEGEND_STYLE}
-                  formatter={(v) => SPEED_BANDS.find((b) => b.key === v)?.label ?? v}
-                />
-                {SPEED_BANDS.map((b, i) => (
-                  <Bar key={b.key} dataKey={b.key} stackId="s" fill={b.color} radius={i === SPEED_BANDS.length - 1 ? [0, 3, 3, 0] : undefined} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+            <>
+              <RankedBars
+                rows={profile}
+                getLabel={(r) => r.name}
+                segments={SPEED_BANDS.map((b) => ({ key: b.key, color: b.color, name: b.label }))}
+                max={100}
+                formatValue={(r) => `${r[">80"]}% > 80`}
+                renderDetail={(r) => `${SPEED_BANDS.map((b) => `${b.label}: ${r[b.key]}%`).join(" · ")} · click a band for the trucks`}
+                onRowClick={(r) => {
+                  setSpeedDrill({ group: r.name, band: speedDrill?.band ?? ">80" });
+                  setDrillSearch("");
+                }}
+                onSegmentClick={(r, band) => {
+                  setSpeedDrill({ group: r.name, band });
+                  setDrillSearch("");
+                }}
+              />
+            </>
           )}
         </ChartCard>
       </div>
+
+      <Modal
+        open={Boolean(safetyDrill)}
+        onClose={() => setSafetyDrill(null)}
+        title={safetyDrill ? `${safetyDrill.label} · ${safetyDrill.band} trucks` : ""}
+        subtitle={`${safetyDrillRows.length} trucks, lowest safety score first${onOpenAsset ? " · click a truck to open it" : ""}`}
+        actions={
+          safetyDrill && (
+            <>
+              <Segmented size="xs" value={safetyDrill.band} onChange={(band) => setSafetyDrill((p) => ({ ...p, band }))} options={SAFETY_BANDS.map((b) => b.name)} />
+              <input
+                type="search"
+                value={safetySearch}
+                onChange={(e) => setSafetySearch(e.target.value)}
+                placeholder="Search VIN, vehicle or model"
+                className="w-48 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
+              />
+            </>
+          )
+        }
+      >
+        {safetyDrillRows.length === 0 ? (
+          <p className="text-sm text-slate-400">No trucks in this band{safetySearch ? " match that search" : ""}.</p>
+        ) : (
+          <RankedBars
+            rows={safetyDrillRows}
+            getLabel={(t) => `${t.vin ?? t.vehicleId} · ${t.modelLabel} · ${t.regionName}`}
+            valueKey="safety"
+            max={100}
+            getColor={(t) => SAFETY_BANDS.find((b) => b.name === t.band)?.color ?? "#94a3b8"}
+            formatValue={(t) => `safety ${t.safety.toFixed(1)}`}
+            renderDetail={(t) =>
+              `Safety ${t.safety.toFixed(1)} · ${formatNumber(t.km)} km · ${t.harshEvents} events (${t.eventsPer1000 === null ? "—" : t.eventsPer1000.toFixed(1)} / 1,000 km, all types)`
+            }
+            onRowClick={onOpenAsset ? (t) => onOpenAsset(t.vehicleId) : undefined}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        open={Boolean(speedDrill)}
+        onClose={() => setSpeedDrill(null)}
+        title={speedDrill ? `${speedDrill.group} · time at ${bandLabel(speedDrill.band)}${speedDrill.band === "0-30" ? "" : " km/h"}` : ""}
+        subtitle={`${visibleDrill.length === drillTrucks.length ? drillTrucks.length : `${visibleDrill.length} of ${drillTrucks.length}`} trucks, highest share first · click a band to re-sort${onOpenAsset ? ", a truck to open it" : ""}`}
+        actions={
+          <input
+            type="search"
+            value={drillSearch}
+            onChange={(e) => setDrillSearch(e.target.value)}
+            placeholder="Search VIN, vehicle or model"
+            className="w-52 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none"
+          />
+        }
+      >
+        {visibleDrill.length === 0 ? (
+          <p className="text-sm text-slate-400">{drillTrucks.length === 0 ? "No trips for these trucks in the period." : "No truck matches that search."}</p>
+        ) : (
+          <RankedBars
+            rows={visibleDrill}
+            getLabel={(r) => `${r.vin ?? r.vehicleId} · ${r.modelLabel}`}
+            segments={SPEED_BANDS.map((b) => ({ key: b.key, color: b.color, name: b.label }))}
+            max={100}
+            formatValue={(r) => (speedDrill ? `${r[speedDrill.band]}% at ${bandLabel(speedDrill.band)}` : "")}
+            renderDetail={(r) => `${SPEED_BANDS.map((b) => `${b.label}: ${r[b.key]}%`).join(" · ")} · ${formatNumber(r.hours, 1)} h driven`}
+            onRowClick={onOpenAsset ? (r) => onOpenAsset(r.vehicleId) : undefined}
+            onSegmentClick={(_r, band) => setSpeedDrill((p) => ({ ...p, band }))}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

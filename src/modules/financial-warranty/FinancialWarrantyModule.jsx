@@ -1,29 +1,11 @@
 import React from 'react';
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import {
-  Factory,
-  HelpCircle,
-  PiggyBank,
-  Receipt,
-  TableProperties,
-  Wallet,
-  Activity
-} from 'lucide-react';
+import { BAR_CHART_PROPS, BAR_GRID, BAR_MAX_SIZE, BAR_RADIUS, BAR_X_AXIS, BAR_Y_AXIS, VALUE_LABEL } from "../../components/ui/barStyle";
+import DonutBreakdown from "../../components/ui/DonutBreakdown";
+import RankedBars from "../../components/ui/RankedBars";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis, LabelList } from 'recharts';
+import { Factory, HelpCircle, PiggyBank, Receipt, Wallet } from 'lucide-react';
 import KpiCard from '../../components/kpi/KpiCard';
+import { DataTable } from '../telematics/TelematicsUi';
 import { useFinancialData } from '../../hooks/useFinancialData';
 
 const currencyFmt = new Intl.NumberFormat('en-US', {
@@ -164,15 +146,13 @@ export default function FinancialModule({ onRowClick }) {
           <ChartHeader title="Historical Exposure by Subsystem" tooltip="Financial exposure mapped to vehicle engineering subsystems." />
           <div className="h-72">
             {loading ? <EmptyState message="Loading…" /> : subsystemData.length === 0 ? <EmptyState message="No claims data." /> : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={subsystemData} dataKey="value" nameKey="name" innerRadius="55%" outerRadius="80%" paddingAngle={3} stroke="none">
-                    {subsystemData.map((d, i) => <Cell key={d.name} fill={SUBSYSTEM_COLORS[i % SUBSYSTEM_COLORS.length]} />)}
-                  </Pie>
-                  <RechartsTooltip formatter={(v, n) => [fmtCurrency(v), n]} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div className="h-full overflow-y-auto pr-1">
+                <DonutBreakdown
+                  data={subsystemData.map((d, i) => ({ name: d.name, value: d.value, color: SUBSYSTEM_COLORS[i % SUBSYSTEM_COLORS.length] }))}
+                  centerLabel="Total exposure"
+                  formatValue={fmtCompact}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -181,15 +161,12 @@ export default function FinancialModule({ onRowClick }) {
           <ChartHeader title="Top 5 Cost-Driving Components" tooltip="The specific components accounting for the highest forecasted liability." />
           <div className="h-72">
             {loading ? <EmptyState message="Loading…" /> : topCostComponents?.length === 0 ? <EmptyState message="No cost data." /> : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart layout="vertical" data={topCostComponents} margin={{ top: 5, right: 15, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={{ stroke: '#e2e8f0' }} tickFormatter={fmtCompact} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#475569' }} tickLine={false} axisLine={false} width={140} tickFormatter={truncateString} />
-                  <RechartsTooltip formatter={(v) => [fmtCurrency(v), 'Projected Exposure']} labelFormatter={(label) => label} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                  <Bar dataKey="exposure" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={16} />
-                </BarChart>
-              </ResponsiveContainer>
+              <RankedBars
+                rows={topCostComponents}
+                getLabel={(r) => r.name}
+                valueKey="exposure"
+                formatValue={(r) => fmtCurrency(r.exposure)}
+              />
             )}
           </div>
         </div>
@@ -200,12 +177,14 @@ export default function FinancialModule({ onRowClick }) {
           <div className="h-72">
             {loading ? <EmptyState message="Loading…" /> : telematicsCostRisk?.length === 0 ? <EmptyState message="No telematics cost data." /> : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={telematicsCostRisk} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                  <XAxis dataKey="signal" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={{ stroke: '#e2e8f0' }} tickFormatter={truncateString} />
-                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={55} />
+                <BarChart data={telematicsCostRisk} {...BAR_CHART_PROPS}>
+                  <CartesianGrid {...BAR_GRID} />
+                  <XAxis dataKey="signal" {...BAR_X_AXIS} tick={{ ...BAR_X_AXIS.tick, fontSize: 11 }} tickFormatter={truncateString} />
+                  <YAxis {...BAR_Y_AXIS} tickFormatter={fmtCompact} width={55} />
                   <RechartsTooltip formatter={(v) => [fmtCurrency(v), 'Associated Cost Risk']} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                  <Bar dataKey="cost" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={28} />
+                  <Bar dataKey="cost" fill="#f59e0b" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE}>
+                    <LabelList dataKey={(d) => fmtCompact(d.cost)} {...VALUE_LABEL} />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -214,41 +193,26 @@ export default function FinancialModule({ onRowClick }) {
       </div>
 
       {/* Section C: Financial Exposure Master Table */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <TableProperties className="h-4 w-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-800">Financial Exposure Master</h3>
-          <span className="text-xs text-slate-400">{loading ? '' : `${nf.format(tableData.length)} components`}</span>
-        </div>
-        <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-100">
-          <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-slate-50">
-              <tr className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                <th className="border-b border-slate-200 px-5 py-3">Component Name</th>
-                <th className="border-b border-slate-200 px-5 py-3 text-right">Projected 90D Demand</th>
-                <th className="border-b border-slate-200 px-5 py-3 text-right">Unit Cost</th>
-                <th className="border-b border-slate-200 px-5 py-3 text-right">Total Projected Liability ($)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr><td colSpan={4} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>
-              ) : tableData.length === 0 ? (
-                <tr><td colSpan={4} className="px-5 py-10 text-center text-slate-400">No inventory forecasts found.</td></tr>
-              ) : (
-                tableData.map((row) => (
-                  <tr key={row.id} onClick={() => onRowClick?.(row)} className="cursor-pointer transition-colors hover:bg-sky-50 group">
-                    <td className="px-5 py-4 font-medium text-slate-800 group-hover:text-sky-700">{row.component}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-700">{nf.format(row.demand)}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-700">{fmtCurrency(row.unitCost)}</td>
-                    <td className="px-5 py-4 text-right tabular-nums font-semibold text-slate-900">{fmtCurrency(row.totalExposure)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        title="Financial Exposure Master"
+        subtitle="Projected 90-day demand, unit cost and liability per component"
+        tooltip="One row per component: projected 90-day replacement demand × unit cost = total projected liability. Click a row to drill into that component."
+        loading={loading}
+        rows={tableData}
+        rowKey={(r) => r.id}
+        onRowClick={onRowClick ? (r) => onRowClick(r) : undefined}
+        emptyMessage="No inventory forecasts found."
+        searchPlaceholder="Search component…"
+        searchText={(r) => r.component}
+        initialSort={{ key: "total", dir: "desc" }}
+        csvName="financial-exposure.csv"
+        columns={[
+          { key: "component", label: "Component Name", sortValue: (r) => r.component, csv: (r) => r.component, render: (r) => r.component },
+          { key: "demand", label: "Projected 90D Demand", align: "right", sortValue: (r) => r.demand, csv: (r) => r.demand, render: (r) => nf.format(r.demand) },
+          { key: "unit", label: "Unit Cost", align: "right", sortValue: (r) => r.unitCost, csv: (r) => r.unitCost, render: (r) => fmtCurrency(r.unitCost) },
+          { key: "total", label: "Total Projected Liability", align: "right", sortValue: (r) => r.totalExposure, csv: (r) => r.totalExposure, className: "font-semibold text-slate-900", render: (r) => fmtCurrency(r.totalExposure) },
+        ]}
+      />
     </div>
   );
 }

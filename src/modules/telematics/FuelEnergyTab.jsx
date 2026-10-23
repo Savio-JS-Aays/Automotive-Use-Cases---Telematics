@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from "react";
+import RankedBars from "../../components/ui/RankedBars";
 import { BatteryCharging, Fuel, Timer } from "lucide-react";
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -27,7 +26,7 @@ import {
   idleByGroup,
   modelBenchmark,
 } from "./telematicsMetrics";
-import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatInr, formatNumber, formatPct, truncateString } from "./telematicsFormat";
+import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatInr, formatNumber, formatPct } from "./telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, LocalSelect, Segmented } from "./TelematicsUi";
 
 const MIN_TRIP_KM_OPTIONS = [
@@ -181,30 +180,19 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
           ) : idleGroups.rows.length === 0 ? (
             <EmptyChart message="No engine hours in this period." />
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={idleGroups.rows} layout="vertical" margin={{ left: 4, right: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" unit="%" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} domain={[0, "auto"]} />
-                <YAxis type="category" dataKey="label" width={150} tickFormatter={(v) => truncateString(v, 22)} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip
-                  cursor={{ fill: "#f8fafc" }}
-                  formatter={(v, _n, item) => {
-                    const g = item.payload;
-                    const cost = g.idleCostInr === null ? "no fuel cost (BEV)" : `${formatInr(g.idleCostInr)} · ${formatInr(g.costPerTruckMonthInr)} per truck / month`;
-                    return [`${v}% · ${formatNumber(g.idleH)} idle h · ${g.trucks} trucks · ${cost}`, "Idle share"];
-                  }}
-                />
-                {idleGroups.fleetPct !== null && (
-                  <ReferenceLine
-                    x={idleGroups.fleetPct}
-                    stroke="#64748b"
-                    strokeDasharray="4 4"
-                    label={{ value: `Fleet ${idleGroups.fleetPct.toFixed(1)}%`, position: "insideTopRight", fontSize: 10, fill: "#64748b" }}
-                  />
-                )}
-                <Bar dataKey="idlePct" fill="#f59e0b" radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <RankedBars
+              rows={idleGroups.rows}
+              getLabel={(r) => r.label}
+              valueKey="idlePct"
+              getColor={() => "#f59e0b"}
+              formatValue={(r) => `${r.idlePct}%`}
+              reference={idleGroups.fleetPct !== null ? { value: idleGroups.fleetPct, label: `Fleet ${idleGroups.fleetPct.toFixed(1)}%` } : undefined}
+              renderDetail={(g) =>
+                `${g.idlePct}% · ${formatNumber(g.idleH)} idle h · ${g.trucks} trucks · ${
+                  g.idleCostInr === null ? "no fuel cost (BEV)" : `${formatInr(g.idleCostInr)} · ${formatInr(g.costPerTruckMonthInr)} per truck / month`
+                }`
+              }
+            />
           )}
         </ChartCard>
 
@@ -264,21 +252,18 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
           ) : split.length === 0 ? (
             <EmptyChart message="No diesel trips in scope." />
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={split} layout="vertical" margin={{ left: 4, right: 12 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" unit="%" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} allowDataOverflow tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="name" width={130} tickFormatter={(v) => truncateString(v, 20)} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip
-                  cursor={{ fill: "#f8fafc" }}
-                  formatter={(v, name, item) => [`${v}% · ${formatNumber(item.payload.litres[name])} L`, name]}
-                />
-                <Legend verticalAlign="bottom" height={28} iconType="circle" wrapperStyle={LEGEND_STYLE} />
-                <Bar dataKey="Driving" stackId="f" fill="#10b981" />
-                <Bar dataKey="Idle" stackId="f" fill="#f59e0b" />
-                <Bar dataKey="PTO" stackId="f" fill="#8b5cf6" radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <RankedBars
+              rows={split}
+              getLabel={(r) => r.name}
+              segments={[
+                { key: "Driving", color: "#10b981", name: "Driving" },
+                { key: "Idle", color: "#f59e0b", name: "Idle" },
+                { key: "PTO", color: "#8b5cf6", name: "PTO" },
+              ]}
+              max={100}
+              formatValue={() => ""}
+              renderDetail={(r) => ["Driving", "Idle", "PTO"].map((k) => `${k}: ${r[k]}% · ${formatNumber(r.litres[k])} L`).join("  ·  ")}
+            />
           )}
         </ChartCard>
         )}
@@ -314,21 +299,13 @@ export default function FuelEnergyTab({ raw, trucks, loading, onOpenAsset }) {
               ) : ev.chargerMix.length === 0 ? (
                 <EmptyChart height="h-48" message="No charging sessions." />
               ) : (
-                <ResponsiveContainer width="100%" height={190}>
-                  <BarChart data={ev.chargerMix} layout="vertical" margin={{ left: 4, right: 12 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                    <XAxis type="number" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} tickFormatter={(v) => `${Math.round(v / 1000)} MWh`} />
-                    <YAxis type="category" dataKey="type" width={72} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                    <RechartsTooltip
-                      cursor={{ fill: "#f8fafc" }}
-                      formatter={(v, _n, item) => [
-                        `${formatNumber(v)} kWh · ${formatInr(item.payload.cost)} · ₹${item.payload.perKwh}/kWh · ${item.payload.sessions} sessions · +${item.payload.avgSocGain}% SoC avg`,
-                        "Energy",
-                      ]}
-                    />
-                    <Bar dataKey="kwh" fill="#0ea5e9" radius={[0, 3, 3, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <RankedBars
+                  rows={ev.chargerMix}
+                  getLabel={(r) => r.type}
+                  valueKey="kwh"
+                  formatValue={(r) => `${formatNumber(r.kwh / 1000, 1)} MWh`}
+                  renderDetail={(r) => `${formatNumber(r.kwh)} kWh · ${formatInr(r.cost)} · ₹${r.perKwh}/kWh · ${r.sessions} sessions · +${r.avgSocGain}% SoC avg`}
+                />
               )}
             </ChartCard>
 

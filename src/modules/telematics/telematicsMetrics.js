@@ -49,12 +49,6 @@ export const SAFETY_BANDS = [
   { name: "Good", min: 85, max: 101, color: "#10b981" },
 ];
 
-export const UTILIZATION_BANDS = [
-  { name: "Under-used", min: 0, max: 20, color: "#f59e0b" },
-  { name: "Normal", min: 20, max: 50, color: "#0ea5e9" },
-  { name: "High", min: 50, max: 101, color: "#10b981" },
-];
-
 export const SPEED_BANDS = [
   { key: "0-30", label: "0–30 km/h", color: "#cbd5e1" },
   { key: "30-50", label: "30–50", color: "#7dd3fc" },
@@ -237,6 +231,7 @@ export function truckStats(raw) {
       regionId: v.region_id,
       regionName: v.region_name,
       applicationName: v.application_name,
+      vehicleType: v.vehicle_type,
       telematicsSource: v.telematics_source,
       powertrain: v.powertrain,
       driverAlias: v.primary_driver_alias,
@@ -246,6 +241,8 @@ export function truckStats(raw) {
       km,
       engineH,
       idleH: sum("idle_hours"),
+      driveH: sum("drive_hours"),
+      ptoH: sum("pto_hours"),
       utilization: days > 0 ? (engineH / (days * 24)) * 100 : null,
       idlePct: ratio(sum("idle_hours"), engineH, 100),
       consumption: bev ? ratio(sum("energy_kwh"), km, 100) : ratio(fuel, km, 100),
@@ -395,79 +392,74 @@ export function activityHeatmap(raw, metric) {
   return { weekdays: WEEKDAYS, grid, max };
 }
 
-/** Region × Model utilization (engine-on hours / 24 h per vehicle-day). */
-export function utilizationMatrix(trucks) {
-  const regions = new Map();
-  const models = new Map();
-  const cells = new Map();
-  for (const t of trucks) {
-    regions.set(t.regionId, t.regionName);
-    models.set(t.modelId, t.modelLabel);
-    const key = `${t.regionId}|${t.modelId}`;
-    const c = cells.get(key) ?? { trucks: 0, engineH: 0, days: 0 };
-    c.trucks += 1;
-    c.engineH += t.engineH;
-    c.days += t.days;
-    cells.set(key, c);
+/** Dimensions a truck can be grouped by in the Utilization matrix. */
+export const MATRIX_DIMENSIONS = {
+  region: { label: "Region", key: (t) => t.regionId, name: (t) => t.regionName },
+  vehicleType: { label: "Vehicle Type", key: (t) => t.vehicleType ?? "—", name: (t) => t.vehicleType ?? "—" },
+  model: { label: "Model", key: (t) => t.modelId, name: (t) => t.modelLabel },
+  application: { label: "Application", key: (t) => t.applicationName ?? "—", name: (t) => t.applicationName ?? "—" },
+  powertrain: { label: "Powertrain", key: (t) => t.powertrain, name: (t) => (t.powertrain === "bev" ? "Battery-electric" : "Diesel") },
+};
+
+/**
+ * Metrics for the matrix, as ratios of sums over the trucks in a cell:
+ * utilization = Σ engine h ÷ (Σ vehicle-days × 24); drive / idle / PTO = Σ hours ÷ Σ vehicle-days.
+ */
+export const MATRIX_METRICS = {
+  utilization: { label: "Utilization", rgb: "79, 70, 229", value: (a) => (a.days > 0 ? (a.engineH / (a.days * 24)) * 100 : null), format: (v) => `${v.toFixed(0)}%`, long: (v) => `${v.toFixed(1)}% utilization` },
+  drive: { label: "Drive", rgb: "14, 165, 233", value: (a) => (a.days > 0 ? a.driveH / a.days : null), format: (v) => `${v.toFixed(1)} h`, long: (v) => `${v.toFixed(2)} drive h per truck-day` },
+  idle: { label: "Idle", rgb: "245, 158, 11", value: (a) => (a.days > 0 ? a.idleH / a.days : null), format: (v) => `${v.toFixed(1)} h`, long: (v) => `${v.toFixed(2)} idle h per truck-day` },
+  pto: { label: "PTO", rgb: "139, 92, 246", value: (a) => (a.days > 0 ? a.ptoH / a.days : null), format: (v) => `${v.toFixed(1)} h`, long: (v) => `${v.toFixed(2)} PTO h per truck-day` },
+};
+
+function aggregateTrucks(list) {
+  const a = { trucks: list.length, engineH: 0, driveH: 0, idleH: 0, ptoH: 0, days: 0 };
+  for (const t of list) {
+    a.engineH += t.engineH;
+    a.driveH += t.driveH;
+    a.idleH += t.idleH;
+    a.ptoH += t.ptoH;
+    a.days += t.days;
   }
-  const sorted = (m) => [...m.entries()].sort(([a], [b]) => String(a).localeCompare(String(b))).map(([id, label]) => ({ id, label }));
-  const rows = sorted(regions);
-  const cols = sorted(models);
+  return a;
+}
+
+/** Any dimension (rows) × any other dimension (cols) for one metric, with row, column and grand totals. */
+export function dimensionMatrix(trucks, rowDim, colDim, metricKey) {
+  const R = MATRIX_DIMENSIONS[rowDim];
+  const C = MATRIX_DIMENSIONS[colDim];
+  const metric = MATRIX_METRICS[metricKey];
+  const labels = (D) => {
+    const m = new Map();
+    for (const t of trucks) m.set(D.key(t), D.name(t));
+    return [...m.entries()].map(([id, label]) => ({ id, label })).sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  };
+  const rows = labels(R);
+  const cols = labels(C);
+  const groups = new Map();
+  for (const t of trucks) {
+    const k = `${R.key(t)}|${C.key(t)}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(t);
+  }
+  const summarize = (list) => {
+    const a = aggregateTrucks(list);
+    return { trucks: a.trucks, value: a.trucks ? metric.value(a) : null, lowSample: a.trucks < MATRIX_MIN_TRUCKS };
+  };
+  const cells = rows.map((r) => cols.map((c) => ({ rowId: r.id, colId: c.id, ...summarize(groups.get(`${r.id}|${c.id}`) ?? []) })));
+  const rowTotals = rows.map((r) => summarize(trucks.filter((t) => R.key(t) === r.id)));
+  const colTotals = cols.map((c) => summarize(trucks.filter((t) => C.key(t) === c.id)));
+  const values = cells.flat().filter((c) => !c.lowSample && c.value !== null).map((c) => c.value);
   return {
     rows,
     cols,
+    cells,
+    rowTotals,
+    colTotals,
+    grand: summarize(trucks),
+    max: metricKey === "utilization" ? 60 : Math.max(0.1, ...values),
     minTrucks: MATRIX_MIN_TRUCKS,
-    cells: rows.map((r) =>
-      cols.map((c) => {
-        const cell = cells.get(`${r.id}|${c.id}`) ?? { trucks: 0, engineH: 0, days: 0 };
-        return {
-          rowId: r.id,
-          colId: c.id,
-          trucks: cell.trucks,
-          value: cell.days > 0 ? (cell.engineH / (cell.days * 24)) * 100 : null,
-          lowSample: cell.trucks < MATRIX_MIN_TRUCKS,
-        };
-      })
-    ),
   };
-}
-
-/** Trucks per 10-point utilization bin (last bin open-ended). */
-export function utilizationDistribution(trucks) {
-  const bins = [0, 10, 20, 30, 40, 50, 60].map((lo) => ({
-    lo,
-    hi: lo === 60 ? 101 : lo + 10,
-    label: lo === 60 ? "60+" : `${lo}–${lo + 10}`,
-    trucks: 0,
-  }));
-  for (const t of trucks) {
-    if (t.utilization === null) continue;
-    const bin = bins.find((b) => t.utilization >= b.lo && t.utilization < b.hi) ?? bins[bins.length - 1];
-    bin.trucks += 1;
-  }
-  return bins.map((b) => ({ ...b, color: bandOf(UTILIZATION_BANDS, b.lo).color }));
-}
-
-export function utilizationByApplication(trucks) {
-  const byApp = new Map();
-  for (const t of trucks) {
-    const key = t.applicationName ?? "Unknown";
-    const a = byApp.get(key) ?? { name: key, trucks: 0, engineH: 0, days: 0, km: 0, opDays: 0 };
-    a.trucks += 1;
-    a.engineH += t.engineH;
-    a.days += t.days;
-    a.km += t.km;
-    a.opDays += t.operatingDays;
-    byApp.set(key, a);
-  }
-  return [...byApp.values()]
-    .map((a) => ({
-      name: a.name,
-      trucks: a.trucks,
-      utilization: a.days > 0 ? Number(((a.engineH / (a.days * 24)) * 100).toFixed(1)) : 0,
-      kmPerOpDay: a.opDays > 0 ? Math.round(a.km / a.opDays) : 0,
-    }))
-    .sort((a, b) => b.utilization - a.utilization);
 }
 
 // ---------------------------------------------------------------------------
@@ -852,20 +844,25 @@ export function safetyKpis(raw, filter) {
 }
 
 /** Events per 1,000 km per family, 7-day rolling (events in window / km in window). */
-export function eventRateTrend(raw, filter) {
+/**
+ * Events per 1,000 km by family over time. `vehicleIds` (Set, optional) limits both events and km to
+ * those trucks; `windowDays` is the rolling window (7 = weekly smoothing, 1 = daily).
+ */
+export function eventRateTrend(raw, filter, { vehicleIds = null, windowDays = ROLLING_DAYS } = {}) {
   if (!raw.period) return { data: [], families: [] };
+  const inScope = (id) => !vehicleIds || vehicleIds.has(id);
   const kmByDate = new Map();
-  for (const r of raw.daily) addTo(kmByDate, r.date_id, num(r.distance_km));
+  for (const r of raw.daily) if (inScope(r.vehicle_id)) addTo(kmByDate, r.date_id, num(r.distance_km));
   const families = EVENT_FAMILIES.filter((f) => !filter.families || filter.families.includes(f.name));
   const countBy = new Map(families.map((f) => [f.name, new Map()]));
   for (const e of raw.events) {
-    if (!eventMatches(e, filter)) continue;
+    if (!inScope(e.vehicle_id) || !eventMatches(e, filter)) continue;
     const m = countBy.get(FAMILY_OF[e.event_type]);
     if (m) addTo(m, e.date_id, 1);
   }
   const dates = periodDates(raw.period);
   const perFamily = new Map(
-    families.map((f) => [f.name, new Map(rollingRatio(dates, countBy.get(f.name), kmByDate, ROLLING_DAYS, 1000).map((p) => [p.date, p.value]))])
+    families.map((f) => [f.name, new Map(rollingRatio(dates, countBy.get(f.name), kmByDate, windowDays, 1000).map((p) => [p.date, p.value]))])
   );
   const data = dates.map((date) => {
     const row = { date };
@@ -1093,20 +1090,32 @@ export function safetyByGroup(raw, filter, by, minKm) {
   };
 }
 
-export function safetyDistribution(drivers, minKm) {
-  const edges = [0, 60, 65, 70, 75, 80, 85, 90, 95];
-  const bins = edges.map((lo, i) => ({
-    lo,
-    hi: i === edges.length - 1 ? 101 : edges[i + 1],
-    label: lo === 0 ? "< 60" : i === edges.length - 1 ? "95+" : `${lo}–${edges[i + 1]}`,
-    drivers: 0,
-  }));
-  for (const d of drivers) {
-    if (d.km < minKm || d.safety === null) continue;
-    const bin = bins.find((b) => d.safety >= b.lo && d.safety < b.hi) ?? bins[bins.length - 1];
-    bin.drivers += 1;
+/**
+ * Share of trucks in each safety band (Coach now / Watch / Good) per group, from the trucks' period
+ * safety scores. Trucks under `minKm` are not rated. Group ids match `safetyByGroup`.
+ */
+export function safetyBandsByGroup(trucks, by, minKm) {
+  const keyOf = (t) => {
+    if (by === "application") return [t.applicationName ?? "Unknown", t.applicationName ?? "Unknown"];
+    if (by === "region") return [t.regionId, t.regionName];
+    return [t.modelId, t.modelLabel];
+  };
+  const groups = new Map();
+  for (const t of trucks) {
+    if (t.km < minKm || t.safety === null) continue;
+    const [id, label] = keyOf(t);
+    const g = groups.get(id) ?? { id, label, rated: 0, counts: Object.fromEntries(SAFETY_BANDS.map((b) => [b.name, 0])), trucks: [] };
+    const band = bandOf(SAFETY_BANDS, t.safety)?.name;
+    if (band) g.counts[band] += 1;
+    g.rated += 1;
+    g.trucks.push({ ...t, band });
+    groups.set(id, g);
   }
-  return bins.map((b) => ({ ...b, color: bandOf(SAFETY_BANDS, b.lo).color, band: bandOf(SAFETY_BANDS, b.lo).name }));
+  return [...groups.values()].map((g) => {
+    const row = { id: g.id, label: g.label, rated: g.rated, counts: g.counts, trucks: g.trucks };
+    for (const b of SAFETY_BANDS) row[b.name] = Number(((g.counts[b.name] / g.rated) * 100).toFixed(1));
+    return row;
+  });
 }
 
 /** Event type × severity counts in the period (ignores the local filter; it *is* a filter). */
@@ -1130,13 +1139,45 @@ export function eventSeverityMatrix(raw) {
 }
 
 /** Share of driving time in each rFMS speed class, per group (application or model). */
+/** Group label of a vehicle for the speed-band views. */
+function speedGroupKey(v, groupBy) {
+  if (groupBy === "model") return v.model_label;
+  if (groupBy === "vehicleType") return v.vehicle_type ?? "Unknown";
+  return v.application_name ?? "Unknown";
+}
+
+/** Speed-band shares per truck inside one group (drill-down), sorted by the share in `sortBand`. */
+export function speedProfileByVehicle(raw, groupBy, groupName, sortBand = ">80") {
+  const vIdx = vehicleIndex(raw);
+  const byVehicle = new Map();
+  for (const t of raw.trips) {
+    const v = vIdx.get(t.vehicle_id);
+    if (!v || !t.speed_class_s || speedGroupKey(v, groupBy) !== groupName) continue;
+    const g = byVehicle.get(v.vehicle_id) ?? { v, total: 0, bands: Object.fromEntries(SPEED_BANDS.map((b) => [b.key, 0])) };
+    for (const b of SPEED_BANDS) {
+      const sec = num(t.speed_class_s[b.key]);
+      g.bands[b.key] += sec;
+      g.total += sec;
+    }
+    byVehicle.set(v.vehicle_id, g);
+  }
+  return [...byVehicle.values()]
+    .filter((g) => g.total > 0)
+    .map((g) => {
+      const row = { vehicleId: g.v.vehicle_id, vin: g.v.vin, modelLabel: g.v.model_label, hours: g.total / 3600 };
+      for (const b of SPEED_BANDS) row[b.key] = Number(((g.bands[b.key] / g.total) * 100).toFixed(1));
+      return row;
+    })
+    .sort((a, b) => b[sortBand] - a[sortBand]);
+}
+
 export function speedProfile(raw, groupBy) {
   const vIdx = vehicleIndex(raw);
   const groups = new Map();
   for (const t of raw.trips) {
     const v = vIdx.get(t.vehicle_id);
     if (!v || !t.speed_class_s) continue;
-    const key = groupBy === "model" ? v.model_label : v.application_name ?? "Unknown";
+    const key = speedGroupKey(v, groupBy);
     const g = groups.get(key) ?? { name: key, total: 0, bands: Object.fromEntries(SPEED_BANDS.map((b) => [b.key, 0])) };
     for (const b of SPEED_BANDS) {
       const s = num(t.speed_class_s[b.key]);
@@ -1190,20 +1231,49 @@ export function completenessTrend(raw) {
   }));
 }
 
-export function completenessBy(trucks, key) {
-  const field = { region: "regionName", source: "telematicsSource", model: "modelLabel" }[key];
-  const groups = new Map();
-  for (const t of trucks) {
-    const name = t[field] ?? "Unknown";
-    const g = groups.get(name) ?? { name, expected: 0, received: 0, trucks: 0 };
-    g.expected += t.expected;
-    g.received += t.received;
-    g.trucks += 1;
-    groups.set(name, g);
+/**
+ * Completeness over time per group (region or model): rolling Σ packets received ÷ Σ expected, one
+ * series per group plus the fleet. Groups are ordered weakest first by their period completeness.
+ */
+export function completenessTrendBy(raw, by) {
+  if (!raw.period) return { data: [], groups: [] };
+  const vIdx = vehicleIndex(raw);
+  const keyOf = (v) => (by === "model" ? [v.model_id, v.model_label] : [v.region_id, v.region_name]);
+  const series = new Map();
+  for (const r of raw.daily) {
+    const v = vIdx.get(r.vehicle_id);
+    if (!v) continue;
+    const [id, label] = keyOf(v);
+    const g = series.get(id) ?? { id, label, exp: new Map(), rec: new Map(), trucks: new Set(), expTotal: 0, recTotal: 0 };
+    addTo(g.exp, r.date_id, num(r.packets_expected));
+    addTo(g.rec, r.date_id, num(r.packets_received));
+    if (inCurrent(raw.period, r.date_id)) {
+      g.expTotal += num(r.packets_expected);
+      g.recTotal += num(r.packets_received);
+    }
+    g.trucks.add(r.vehicle_id);
+    series.set(id, g);
   }
-  return [...groups.values()]
-    .map((g) => ({ name: g.name, trucks: g.trucks, completeness: g.expected > 0 ? Number(((g.received / g.expected) * 100).toFixed(2)) : 0 }))
-    .sort((a, b) => a.completeness - b.completeness);
+  const dates = periodDates(raw.period);
+  const groups = [...series.values()]
+    .map((g) => ({
+      id: g.id,
+      label: g.label,
+      trucks: g.trucks.size,
+      completeness: g.expTotal > 0 ? (g.recTotal / g.expTotal) * 100 : null,
+      points: new Map(rollingRatio(dates, g.rec, g.exp, ROLLING_DAYS, 100).map((p) => [p.date, p.value])),
+    }))
+    .sort((a, b) => (a.completeness ?? 101) - (b.completeness ?? 101));
+  const fleet = new Map(completenessTrend(raw).map((p) => [p.date, p.value]));
+  const data = dates.map((date) => {
+    const row = { date, fleet: fleet.get(date) ?? null };
+    for (const g of groups) {
+      const v = g.points.get(date);
+      row[g.id] = v === null || v === undefined ? null : Number(v.toFixed(2));
+    }
+    return row;
+  });
+  return { data, groups: groups.map(({ points, ...g }) => g) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1241,6 +1311,22 @@ export function assetKpis(raw) {
     redLampDtcs: raw.activeDtcs.filter((d) => d.lamp_status === "RSL" || d.caused_derate).length,
     lastPing,
   };
+}
+
+/**
+ * One truck's data completeness per day: packets received ÷ expected.
+ */
+export function assetCompletenessTrend(raw) {
+  const days = [...raw.daily].sort((a, b) => (a.date_id < b.date_id ? -1 : 1));
+  return days.map((r) => {
+    const exp = num(r.packets_expected);
+    return {
+      date: r.date_id,
+      daily: exp > 0 ? Number(((num(r.packets_received) / exp) * 100).toFixed(1)) : null,
+      received: num(r.packets_received),
+      expected: exp,
+    };
+  });
 }
 
 export function assetDailyTrend(raw) {

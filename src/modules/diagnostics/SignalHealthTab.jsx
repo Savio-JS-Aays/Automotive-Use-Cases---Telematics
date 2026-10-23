@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { Activity, AlertTriangle, ArrowDownUp, BellRing, Clock, SlidersHorizontal } from "lucide-react";
+import { BAR_CHART_PROPS, BAR_GRID, BAR_MAX_SIZE, BAR_RADIUS, BAR_X_AXIS, BAR_Y_AXIS, VALUE_LABEL } from "../../components/ui/barStyle";
+import { AlertTriangle, ArrowDownUp, BellRing, Clock, SlidersHorizontal } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -17,6 +18,7 @@ import {
   XAxis,
   YAxis,
   ZAxis,
+  LabelList,
 } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
 import { modelColors } from "../telematics/telematicsMetrics";
@@ -26,6 +28,8 @@ import {
   healthSignals,
   latestReadings,
   leadTimes,
+  signalWatchlist,
+  signalHeatGroups,
   signalHeatmap,
   signalKpis,
   sortHeatmap,
@@ -34,7 +38,8 @@ import {
   dpfScatter,
 } from "./diagnosticsMetrics";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDay, formatNumber, formatPct } from "../telematics/telematicsFormat";
-import { ChartCard, ChartSkeleton, EmptyChart, HeatGrid, Segmented } from "../telematics/TelematicsUi";
+import { ChartCard, ChartSkeleton, DataTable, EmptyChart, HeatGrid, Pill, Segmented } from "../telematics/TelematicsUi";
+import { StatePill } from "./diagnosticsUi";
 import BandStrip from "./BandStrip";
 
 const SHORT_SIGNAL = {
@@ -74,6 +79,8 @@ function DpfTooltip({ active, payload }) {
 
 export default function SignalHealthTab({ raw, loading: fleetLoading, signalHealth, onOpenAsset }) {
   const [sort, setSort] = useState({ key: "risk", dir: "desc" });
+  const [heatBy, setHeatBy] = useState("truck"); // truck | model | application
+  const [heatFilter, setHeatFilter] = useState(null); // { by, id, label } limits the truck view to one group
   const { data: sig, error } = signalHealth;
   const loading = fleetLoading || signalHealth.loading;
 
@@ -85,6 +92,7 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
   const distribution = useMemo(() => bandDistribution(latest, signals), [latest, signals]);
   const trend = useMemo(() => anomalyTrend(raw, sig), [raw, sig]);
   const dpf = useMemo(() => dpfScatter(raw, latest), [raw, latest]);
+  const watchlist = useMemo(() => signalWatchlist(raw, sig, latest), [raw, sig, latest]);
   const scr = useMemo(() => signalTrendByModel(raw, sig, "SCR_EFFICIENCY"), [raw, sig]);
   const signalByCode = useMemo(() => new Map(sig.signals.map((s) => [s.signal_code, s])), [sig.signals]);
   const colors = useMemo(() => modelColors(raw.vehicles), [raw.vehicles]);
@@ -93,8 +101,10 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
     return <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Couldn't load signal data: {error.message}</div>;
   }
 
-  const heatRows = sortHeatmap(heat, sort.key, sort.dir);
-  const flaggedTrucks = heat.filter((t) => t.worst >= 2).length;
+  const heatScoped = heatFilter ? heat.filter((t) => (heatFilter.by === "model" ? t.modelId : t.application) === heatFilter.id) : heat;
+  const heatRows = sortHeatmap(heatScoped, sort.key, sort.dir);
+  const heatGroups = heatBy === "truck" ? [] : signalHeatGroups(heat, signals, heatBy);
+  const groupNoun = heatBy === "application" ? "application" : "model";
   const sortedSignal = signals.find((s) => s.signal_code === sort.key);
   const textSort = sort.key === "vin" || sort.key === "model";
   const dirLabel = textSort ? (sort.dir === "asc" ? "A → Z" : "Z → A") : sort.dir === "desc" ? "Worst first" : "Best first";
@@ -106,7 +116,7 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Trucks with Critical Signal"
           badge="NOW"
@@ -141,16 +151,6 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
           tooltip="Trucks with at least one anomalous reading in the period (|z| > 3, or Mahalanobis > 3 with |z| > 2). Anomalies catch unusual behaviour even inside the normal band."
         />
         <KpiCard
-          title="Anomalous Reading Rate"
-          badge="PERIOD"
-          value={formatPct(kpis.anomalousRate, 2)}
-          icon={Activity}
-          iconBgClass="bg-sky-50"
-          iconColorClass="text-sky-600"
-          loading={loading}
-          tooltip="Anomalous readings ÷ all health-signal readings in the period. A fleet-wide rise with no matching fault codes can also mean a sensor or gateway problem."
-        />
-        <KpiCard
           title="Anomaly → DTC Lead Time"
           badge="PERIOD"
           value={kpis.medianLead !== null ? `${formatNumber(kpis.medianLead, 0)} d` : "—"}
@@ -164,12 +164,25 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
       </div>
 
       <ChartCard
-        title="Truck × Signal Health Map"
+        title={heatBy === "truck" ? "Truck × Signal Health Map" : `${heatBy === "model" ? "Model" : "Application"} × Signal Health Map`}
         badge="NOW"
         tooltip="Latest daily reading of every health signal per truck. Colour follows the band state (critical darkest, then warning, then outside normal); the number is the day's max |z-score|. All trucks are listed. Sort by overall risk, VIN or model with the buttons, or click a signal's column header to sort by that signal (worst first; click again to reverse). Click a cell to open the truck with that signal in focus."
         actions={
           <>
-            <span className="text-[11px] text-slate-400">Darker = worse band state · number = max |z|</span>
+            <Segmented
+              value={heatBy}
+              onChange={(v) => {
+                setHeatBy(v);
+                setHeatFilter(null);
+              }}
+              options={[
+                { value: "truck", label: "Trucks" },
+                { value: "model", label: "Models" },
+                { value: "application", label: "Applications" },
+              ]}
+            />
+            {heatBy === "truck" && (
+            <>
             <Segmented
               value={["risk", "vin", "model"].includes(sort.key) ? sort.key : null}
               onChange={(key) => setSort({ key, dir: key === "risk" ? "desc" : "asc" })}
@@ -184,6 +197,8 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
               <ArrowDownUp className="h-3.5 w-3.5" />
               {dirLabel}
             </button>
+            </>
+            )}
           </>
         }
       >
@@ -191,8 +206,63 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
           <ChartSkeleton height="h-96" />
         ) : heat.length === 0 ? (
           <EmptyChart message="No health-signal readings in this period." />
+        ) : heatBy !== "truck" ? (
+          <>
+            <HeatGrid
+              rows={heatGroups.map((g) => ({ id: g.id, label: `${g.label} (${g.trucks})` }))}
+              cols={signals.map((s) => ({ id: s.signal_code, label: s.signal_name }))}
+              colLabel={(c) => SHORT_SIGNAL[c.id] ?? c.label}
+              max={Math.max(10, ...heatGroups.flatMap((g) => Object.values(g.cells).map((c) => c.share)))}
+              rgb="225, 29, 72"
+              rowLabelWidth={190}
+              minColWidth={56}
+              cellHeight="h-10"
+              gapClass="gap-0.5"
+              cellFor={(ri, ci) => {
+                const g = heatGroups[ri];
+                const s = signals[ci];
+                const c = g.cells[s.signal_code];
+                if (!c) return { empty: true, title: `${g.label} · ${s.signal_name}: not fitted` };
+                return {
+                  value: c.share,
+                  display: `${Math.round(c.share)}%`,
+                  sub: `${c.critical + c.warning}/${c.n}`,
+                  title: `${g.label} · ${s.signal_name}: ${c.critical} critical, ${c.warning} warning, ${c.outside} outside normal of ${c.n} trucks · mean max |z| ${formatNumber(c.meanZ, 1)} · click for the trucks`,
+                  onClick: () => {
+                    setHeatFilter({ by: heatBy, id: g.id, label: g.label });
+                    setHeatBy("truck");
+                    setSort({ key: s.signal_code, dir: "desc" });
+                  },
+                };
+              }}
+            />
+            <p className="mt-2 text-[11px] text-slate-400">
+              Cell = share of the {groupNoun}'s trucks whose latest reading is in warning or critical (small number = trucks / trucks reporting). Rows sorted by the share of
+              trucks with any warning or critical signal; the count in brackets is trucks. Click a cell to list those trucks.
+            </p>
+          </>
         ) : (
           <>
+            {heatFilter && (
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-1 text-white">
+                  {heatFilter.by === "model" ? "Model" : "Application"}: {heatFilter.label}
+                  <button type="button" aria-label="Clear group filter" onClick={() => setHeatFilter(null)}>
+                    ×
+                  </button>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeatBy(heatFilter.by);
+                    setHeatFilter(null);
+                  }}
+                  className="text-slate-500 underline-offset-2 hover:underline"
+                >
+                  Back to {heatFilter.by === "model" ? "models" : "applications"}
+                </button>
+              </div>
+            )}
             <div className="pr-1">
               <HeatGrid
                 scrollClass="max-h-[32rem]"
@@ -223,7 +293,7 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
               />
             </div>
             <p className="mt-2 text-[11px] text-slate-400">
-              {flaggedTrucks} of {heat.length} trucks have a warning or critical signal. Sorted by {sortLabel}.
+              Darker = worse band state · number = max |z|. {heatRows.filter((t) => t.worst >= 2).length} of {heatRows.length} trucks have a warning or critical signal. Sorted by {sortLabel}.
             </p>
           </>
         )}
@@ -287,16 +357,17 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
             ) : lead.linked === 0 ? (
               <EmptyChart height="h-48" message="No fault codes with a linked signal in this period." />
             ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={lead.buckets}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                  <XAxis dataKey="label" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                  <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={32} />
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={lead.buckets} {...BAR_CHART_PROPS}>
+                  <CartesianGrid {...BAR_GRID} />
+                  <XAxis dataKey="label" {...BAR_X_AXIS} />
+                  <YAxis allowDecimals={false} {...BAR_Y_AXIS} width={32} />
                   <RechartsTooltip formatter={(v) => [v, "Fault codes"]} />
-                  <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                  <Bar dataKey="count" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE}>
                     {lead.buckets.map((b) => (
                       <Cell key={b.label} fill={b.warned ? "#10b981" : "#cbd5e1"} />
                     ))}
+                    <LabelList dataKey="count" {...VALUE_LABEL} />
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -370,6 +441,93 @@ export default function SignalHealthTab({ raw, loading: fleetLoading, signalHeal
         )}
       </div>
       )}
+
+      <DataTable
+        title="Signal Watchlist"
+        tooltip="Every truck × health signal whose latest daily value is outside the normal band, worst first: critical, then warning, then just outside; then by days out of band. Trend = slope of the daily mean over the last 14 days with data (worsening / improving relative to the signal's bad direction). Linked fault = an active code whose freeze frame names this signal; likely part from the fault-code → part mapping. Click a row to open the truck on that signal."
+        loading={loading}
+        rows={watchlist}
+        rowKey={(r) => r.key}
+        onRowClick={(r) => onOpenAsset(r.vehicleId, r.signalCode)}
+        emptyMessage="Every monitored signal is inside its normal band."
+        searchPlaceholder="Search VIN, signal, code or part"
+        searchText={(r) => `${r.vin} ${r.vehicleId} ${r.modelLabel ?? ""} ${r.signalName} ${r.dtcId ?? ""} ${r.part ?? ""}`}
+        csvName="signal-watchlist.csv"
+        columns={[
+          {
+            key: "truck",
+            label: "Truck",
+            sortValue: (r) => r.vin,
+            csv: (r) => r.vin,
+            render: (r) => (
+              <div>
+                <p className="font-medium text-slate-700">{r.vin}</p>
+                <p className="text-[11px] text-slate-400">
+                  {r.modelLabel} · {r.regionName}
+                </p>
+              </div>
+            ),
+          },
+          { key: "signal", label: "Signal", sortValue: (r) => r.signalName, csv: (r) => r.signalName, render: (r) => <span className="text-xs">{r.signalName}</span> },
+          {
+            key: "value",
+            label: "Latest",
+            align: "right",
+            sortValue: (r) => r.value,
+            csv: (r) => r.value,
+            render: (r) => (
+              <div className="text-right">
+                <p className="text-xs font-semibold text-slate-700">
+                  {formatNumber(r.value, 1)} {r.unit}
+                </p>
+                <p className="text-[11px] text-slate-400">{formatDay(r.date)}</p>
+              </div>
+            ),
+          },
+          {
+            key: "band",
+            label: "Normal band",
+            csv: (r) => `${r.normalMin}-${r.normalMax}`,
+            render: (r) => (
+              <span className="whitespace-nowrap text-xs text-slate-500">
+                {formatNumber(r.normalMin, 1)}–{formatNumber(r.normalMax, 1)} {r.unit}
+              </span>
+            ),
+          },
+          { key: "state", label: "State", sortValue: (r) => r.stateRank, csv: (r) => r.state, render: (r) => <StatePill state={r.state} /> },
+          { key: "days", label: "Days out", align: "right", sortValue: (r) => r.daysOut, csv: (r) => r.daysOut, render: (r) => r.daysOut },
+          {
+            key: "trend",
+            label: "Trend (14 d)",
+            sortValue: (r) => (r.trend === "worsening" ? 2 : r.trend === "stable" ? 1 : 0),
+            csv: (r) => `${r.trend}${r.slopePerWeek !== null ? ` ${r.slopePerWeek.toFixed(2)}/wk` : ""}`,
+            render: (r) => (
+              <span
+                className={`whitespace-nowrap text-xs ${r.trend === "worsening" ? "font-semibold text-rose-600" : r.trend === "improving" ? "text-emerald-600" : "text-slate-500"}`}
+                title={r.slopePerWeek !== null ? `${r.slopePerWeek > 0 ? "+" : ""}${r.slopePerWeek.toFixed(2)} ${r.unit} per week` : "Too few days"}
+              >
+                {r.trend === "worsening" ? "▲ worsening" : r.trend === "improving" ? "▼ improving" : "■ stable"}
+              </span>
+            ),
+          },
+          {
+            key: "dtc",
+            label: "Linked fault",
+            sortValue: (r) => r.dtcId ?? "",
+            csv: (r) => r.dtcId ?? "",
+            render: (r) =>
+              r.dtcId ? (
+                <div>
+                  <p className="text-xs text-slate-700">{r.dtcName}</p>
+                  <p className="text-[11px] text-slate-400">{r.dtcId}</p>
+                </div>
+              ) : (
+                <Pill className="bg-amber-50 text-amber-700">No code yet</Pill>
+              ),
+          },
+          { key: "part", label: "Likely part", sortValue: (r) => r.part ?? "", csv: (r) => r.part ?? "", render: (r) => <span className="text-xs">{r.part ?? "—"}</span> },
+        ]}
+      />
     </div>
   );
 }

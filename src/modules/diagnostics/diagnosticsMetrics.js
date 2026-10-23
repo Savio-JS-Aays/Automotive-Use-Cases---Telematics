@@ -343,7 +343,7 @@ export function dtcRateTrend(raw) {
  * Most common faults: distinct trucks that had each code. scope: "period" (first seen in the
  * period) or "active" (active now). Intermittent codes are always left out.
  */
-export function topFaults(raw, { scope }) {
+export function topFaults(raw, { scope, limit = TOP_FAULTS }) {
   const events = raw.dtcEvents.filter((e) => {
     if (isIntermittent(e)) return false;
     return scope === "active" ? e.status === "active" : inCurrent(raw.period, e.date_id);
@@ -371,28 +371,93 @@ export function topFaults(raw, { scope }) {
   const all = [...byCode.values()]
     .map((g) => ({ ...g, trucks: g.trucks.size, tone: faultTone(g.lamp) }))
     .sort((a, b) => b.trucks - a.trucks || b.count - a.count);
-  return { rows: all.slice(0, TOP_FAULTS), codes: all.length, fleetTrucks: fleet.size, total: events.length };
+  return { rows: all.slice(0, limit), codes: all.length, fleetTrucks: fleet.size, total: events.length };
 }
 
-/** Faults per 100 trucks by model (rows) × system (cols), for DTCs first seen in the period. */
-export function systemModelMatrix(raw) {
-  const trucksByModel = new Map();
-  for (const v of raw.vehicles) {
-    const m = trucksByModel.get(v.model_id) ?? { id: v.model_id, label: v.model_label, trucks: 0 };
-    m.trucks += 1;
-    trucksByModel.set(v.model_id, m);
+/** Lamps that mean stop or power limited. */
+const RED_LAMP_SET = new Set(["RSL", "PL"]);
+
+/**
+ * Fault codes per 100 trucks: group (model, region or application) × vehicle system.
+ * opts.by: "model" | "region" | "application"; opts.scope: "period" (new non-intermittent codes first
+ * seen in the period) | "active" (active now); opts.severity: "all" | "critical" | "major" | "minor";
+ * opts.lamp: "all" | "red" (RSL / PL) | "amber" (AWL / MIL).
+ */
+function matrixGroupKey(v, by) {
+  if (by === "region") return [v.region_id, v.region_name];
+  if (by === "application") return [v.application_name ?? "Unknown", v.application_name ?? "Unknown"];
+  return [v.model_id, v.model_label];
+}
+
+function matrixEventMatches(raw, e, { scope = "period", severity = "all", lamp = "all" }) {
+  if (scope === "active" ? e.status !== "active" : isIntermittent(e) || !inCurrent(raw.period, e.date_id)) return false;
+  if (severity !== "all" && e.dim_dtc?.severity_class !== severity) return false;
+  if (lamp === "red" && !RED_LAMP_SET.has(e.lamp_status)) return false;
+  if (lamp === "amber" && RED_LAMP_SET.has(e.lamp_status)) return false;
+  return true;
+}
+
+/** The fault events behind one matrix cell (same filters), for the pop-up drill-down. */
+export function systemMatrixCell(raw, opts, groupId, system) {
+  const by = opts.by ?? "model";
+  const vIdx = new Map(raw.vehicles.map((v) => [v.vehicle_id, v]));
+  const events = raw.dtcEvents
+    .filter((e) => {
+      const v = vIdx.get(e.vehicle_id);
+      return v && matrixGroupKey(v, by)[0] === groupId && (e.dim_dtc?.system ?? "other") === system && matrixEventMatches(raw, e, opts);
+    })
+    .map((e) => {
+      const v = vIdx.get(e.vehicle_id);
+      return {
+        id: e.dtc_event_id,
+        vehicleId: e.vehicle_id,
+        vin: v?.vin,
+        modelLabel: v?.model_label,
+        regionName: v?.region_name,
+        dtcId: e.dtc_id,
+        name: faultName(e),
+        lamp: e.lamp_status,
+        severity: e.dim_dtc?.severity_class,
+        status: e.status,
+        firstSeen: e.first_seen_ts,
+        occurrences: e.occurrence_count,
+      };
+    })
+    .sort((a, b) => (a.firstSeen < b.firstSeen ? 1 : -1));
+  const byCode = new Map();
+  for (const e of events) {
+    const g = byCode.get(e.dtcId) ?? { dtcId: e.dtcId, name: e.name, lamp: e.lamp, count: 0, trucks: new Set() };
+    g.count += 1;
+    g.trucks.add(e.vehicleId);
+    byCode.set(e.dtcId, g);
   }
-  const modelOf = new Map(raw.vehicles.map((v) => [v.vehicle_id, v.model_id]));
+  const codes = [...byCode.values()]
+    .map((g) => ({ ...g, trucks: g.trucks.size, tone: faultTone(g.lamp) }))
+    .sort((a, b) => b.count - a.count);
+  return { events, codes, trucks: new Set(events.map((e) => e.vehicleId)).size };
+}
+
+export function systemModelMatrix(raw, { by = "model", scope = "period", severity = "all", lamp = "all" } = {}) {
+  const keyOf = (v) => matrixGroupKey(v, by);
+  const groupsById = new Map();
+  const groupOf = new Map();
+  for (const v of raw.vehicles) {
+    const [id, label] = keyOf(v);
+    const g = groupsById.get(id) ?? { id, label, trucks: 0 };
+    g.trucks += 1;
+    groupsById.set(id, g);
+    groupOf.set(v.vehicle_id, id);
+  }
   const counts = new Map();
   const systems = new Set();
   for (const e of raw.dtcEvents) {
-    if (isIntermittent(e) || !inCurrent(raw.period, e.date_id)) continue;
+    if (!matrixEventMatches(raw, e, { scope, severity, lamp })) continue;
     const system = e.dim_dtc?.system ?? "other";
     systems.add(system);
-    const key = `${modelOf.get(e.vehicle_id)}|${system}`;
+    const key = `${groupOf.get(e.vehicle_id)}|${system}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  const rows = [...trucksByModel.values()].sort((a, b) => a.label.localeCompare(b.label));
+  const rows = [...groupsById.values()].sort((a, b) => String(a.label).localeCompare(String(b.label)));
   const cols = [...systems].sort().map((s) => ({ id: s, label: systemLabel(s) }));
   let max = 0;
   const cells = new Map();
@@ -452,6 +517,8 @@ export function activeDtcRows(raw) {
         vehicleId: e.vehicle_id,
         vin: v?.vin ?? e.vehicle_id,
         modelId: v?.model_id,
+        regionId: v?.region_id,
+        application: v?.application_name ?? "Unknown",
         modelLabel: v?.model_label ?? "—",
         dtcId: e.dtc_id,
         label: dtcLabel(e),
@@ -574,6 +641,90 @@ export function stateMeta(id) {
 const CATEGORY_ORDER = ["aftertreatment", "powertrain", "fuel", "cooling", "electrical", "brakes", "tyres", "ev", "vehicle"];
 
 /** Health signals present in the rollup that have a normal band, in a stable display order. */
+const TREND_DAYS = 14;
+
+/**
+ * Signal Watchlist: every truck × health signal whose latest daily value is outside the normal band.
+ * Days out of band = period days whose daily mean is not normal. Trend = least-squares slope of the
+ * daily mean over the last 14 days with data, per week, labelled worsening / improving by the
+ * signal's direction (stable when the weekly change is under 2 % of the band width).
+ * Linked fault = an active code on the truck whose freeze frame names this signal; likely part from
+ * bridge_dtc_part (highest likelihood).
+ */
+export function signalWatchlist(fleetRaw, sig, latest) {
+  const signalsByCode = new Map(sig.signals.map((s) => [s.signal_code, s]));
+  const vIdx = new Map(fleetRaw.vehicles.map((v) => [v.vehicle_id, v]));
+  const series = new Map();
+  for (const r of sig.rows) {
+    if (!inCurrent(fleetRaw.period, r.date_id)) continue;
+    const key = `${r.vehicle_id}|${r.signal_code}`;
+    if (!series.has(key)) series.set(key, []);
+    series.get(key).push(r);
+  }
+  const activeBySignal = new Map();
+  for (const e of fleetRaw.dtcEvents) {
+    if (e.status !== "active") continue;
+    const sigCode = freezeSignal(e);
+    if (!sigCode) continue;
+    const key = `${e.vehicle_id}|${sigCode}`;
+    if (!activeBySignal.has(key)) activeBySignal.set(key, e);
+  }
+  const partFor = (dtcId) =>
+    fleetRaw.bridge.filter((b) => b.dtc_id === dtcId).sort((a, b) => num(b.likelihood) - num(a.likelihood))[0]?.dim_part?.part_name ?? null;
+  const out = [];
+  for (const [key, r] of latest) {
+    const signal = signalsByCode.get(r.signal_code);
+    const state = bandState(signal, r.avg_value);
+    if (!state || state === "normal") continue;
+    const v = vIdx.get(r.vehicle_id);
+    const rows = (series.get(key) ?? []).sort((a, b) => (a.date_id < b.date_id ? -1 : 1));
+    const daysOut = rows.filter((d) => {
+      const st = bandState(signal, d.avg_value);
+      return st && st !== "normal";
+    }).length;
+    const recent = rows.slice(-TREND_DAYS).filter((d) => d.avg_value !== null);
+    let slopePerWeek = null;
+    if (recent.length >= 3) {
+      const xs = recent.map((d) => daysBetween(recent[0].date_id, d.date_id));
+      const ys = recent.map((d) => Number(d.avg_value));
+      const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+      const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+      const sxx = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+      if (sxx > 0) slopePerWeek = (xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / sxx) * 7;
+    }
+    const width = Math.abs(num(signal.normal_max) - num(signal.normal_min)) || 1;
+    let trend = "stable";
+    if (slopePerWeek !== null && Math.abs(slopePerWeek) >= 0.02 * width) {
+      const worse = signal.direction === "high" ? slopePerWeek > 0 : slopePerWeek < 0;
+      trend = worse ? "worsening" : "improving";
+    }
+    const dtc = activeBySignal.get(key) ?? null;
+    out.push({
+      key,
+      vehicleId: r.vehicle_id,
+      vin: v?.vin ?? r.vehicle_id,
+      modelLabel: v?.model_label,
+      regionName: v?.region_name,
+      signalCode: r.signal_code,
+      signalName: signal.signal_name,
+      unit: signal.unit,
+      value: Number(r.avg_value),
+      date: r.date_id,
+      normalMin: signal.normal_min,
+      normalMax: signal.normal_max,
+      state,
+      stateRank: STATE_RANK[state] ?? 0,
+      daysOut,
+      slopePerWeek,
+      trend,
+      dtcId: dtc?.dtc_id ?? null,
+      dtcName: dtc ? faultName(dtc) : null,
+      part: dtc ? partFor(dtc.dtc_id) : null,
+    });
+  }
+  return out.sort((a, b) => b.stateRank - a.stateRank || b.daysOut - a.daysOut || (b.trend === "worsening") - (a.trend === "worsening"));
+}
+
 export function healthSignals(sig) {
   const present = new Set(sig.rows.map((r) => r.signal_code));
   return sig.signals
@@ -633,12 +784,8 @@ export function signalKpis(fleetRaw, sig, latest, lead) {
     if (state && state !== "normal") outOfBand += 1;
   }
   const anomalousTrucks = new Set();
-  let readings = 0;
-  let anomalous = 0;
   for (const r of sig.rows) {
     if (!inCurrent(fleetRaw.period, r.date_id)) continue;
-    readings += num(r.readings);
-    anomalous += num(r.anomalous_readings);
     if (num(r.anomalous_readings) > 0) anomalousTrucks.add(r.vehicle_id);
   }
   return {
@@ -646,7 +793,6 @@ export function signalKpis(fleetRaw, sig, latest, lead) {
     outOfBand,
     pairs: latest.size,
     anomalousTrucks: anomalousTrucks.size,
-    anomalousRate: ratio(anomalous, readings, 100),
     medianLead: lead.medianLead,
     warnedPct: lead.warnedPct,
   };
@@ -656,6 +802,41 @@ export function signalKpis(fleetRaw, sig, latest, lead) {
  * Truck × signal grid on the latest reading. Cell value = state rank + min(|z| / 10, 0.9) so
  * colour follows the band state first and the deviation second.
  */
+/**
+ * Health map aggregated by model or application: per group × signal, how many of the group's trucks
+ * have a latest reading in each band state. value = share in warning or critical (colour); outside
+ * normal is counted separately. Groups are sorted by their overall warning-or-critical share.
+ */
+export function signalHeatGroups(heat, signals, by) {
+  const keyOf = (t) => (by === "application" ? [t.application, t.application] : [t.modelId, t.modelLabel]);
+  const groups = new Map();
+  for (const t of heat) {
+    const [id, label] = keyOf(t);
+    const g = groups.get(id) ?? { id, label, trucks: 0, cells: {}, flaggedTrucks: 0 };
+    g.trucks += 1;
+    if (t.worst >= 2) g.flaggedTrucks += 1;
+    for (const s of signals) {
+      const c = t.cells[s.signal_code];
+      if (!c) continue;
+      const cell = g.cells[s.signal_code] ?? { n: 0, critical: 0, warning: 0, outside: 0, zSum: 0 };
+      cell.n += 1;
+      if (c.state === "critical" || c.state === "warning" || c.state === "outside") cell[c.state] += 1;
+      cell.zSum += c.z;
+      g.cells[s.signal_code] = cell;
+    }
+    groups.set(id, g);
+  }
+  return [...groups.values()]
+    .map((g) => {
+      for (const c of Object.values(g.cells)) {
+        c.share = c.n ? ((c.critical + c.warning) / c.n) * 100 : 0;
+        c.meanZ = c.n ? c.zSum / c.n : 0;
+      }
+      return { ...g, flaggedPct: g.trucks ? (g.flaggedTrucks / g.trucks) * 100 : 0 };
+    })
+    .sort((a, b) => b.flaggedPct - a.flaggedPct || String(a.label).localeCompare(String(b.label)));
+}
+
 export function signalHeatmap(fleetRaw, sig, latest, signals) {
   const trucks = fleetRaw.vehicles.map((v) => {
     const cells = {};
@@ -670,7 +851,7 @@ export function signalHeatmap(fleetRaw, sig, latest, signals) {
       worst = Math.max(worst, STATE_RANK[state] ?? 0);
       maxZ = Math.max(maxZ, z);
     }
-    return { vehicleId: v.vehicle_id, vin: v.vin, modelLabel: v.model_label, cells, worst, maxZ, score: worst * 100 + maxZ };
+    return { vehicleId: v.vehicle_id, vin: v.vin, modelId: v.model_id, modelLabel: v.model_label, application: v.application_name ?? "Unknown", cells, worst, maxZ, score: worst * 100 + maxZ };
   });
   return trucks.filter((t) => Object.keys(t.cells).length > 0).sort((a, b) => b.score - a.score);
 }

@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { BAR_CHART_PROPS, BAR_GRID, BAR_MAX_SIZE, BAR_RADIUS, BAR_X_AXIS, BAR_Y_AXIS, MAX_LABELLED_BARS, VALUE_LABEL } from "../../components/ui/barStyle";
 import {
   Area,
   Bar,
@@ -14,6 +15,7 @@ import {
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
+  LabelList,
 } from "recharts";
 import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatNumber } from "../telematics/telematicsFormat";
 import { EmptyChart } from "../telematics/TelematicsUi";
@@ -116,12 +118,14 @@ export function HazardChart({ lt, partId, height = 240 }) {
   if (rows.length === 0) return <EmptyChart message="Not enough units at risk." />;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={rows}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-        <YAxis tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} width={40} />
+      <BarChart data={rows} {...BAR_CHART_PROPS}>
+        <CartesianGrid {...BAR_GRID} />
+        <XAxis dataKey="label" {...BAR_X_AXIS} tick={{ ...BAR_X_AXIS.tick, fontSize: 11 }} />
+        <YAxis {...BAR_Y_AXIS} width={40} />
         <RechartsTooltip formatter={(v, _n, item) => [`${v} per 1,000 units (${formatNumber(item.payload.failures)} failures, ${item.payload.atRisk} at risk)`, "Hazard"]} />
-        <Bar dataKey="rate" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="rate" fill="#8b5cf6" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE}>
+          {rows.length <= MAX_LABELLED_BARS && <LabelList dataKey="rate" {...VALUE_LABEL} />}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );

@@ -498,6 +498,72 @@ export function weibullY(Fpct) {
 // ---------------------------------------------------------------------------
 // Supplier & build quality
 // ---------------------------------------------------------------------------
+/**
+ * One row per supplier across all its parts. Field-B10 figures use the part × supplier groups with
+ * ≥ 5 failures (same groups as the scorecard); failure rate = Σ failures ÷ Σ km of part life of the
+ * supplier's part groups that had a failure × 100,000; downtime and cost come from the supplier's
+ * replacements. Status from the median % of design (hazardStatus rules).
+ */
+export function supplierTable(lt, summaries) {
+  const bySupplier = new Map();
+  const ensure = (id) => {
+    if (!bySupplier.has(id)) {
+      bySupplier.set(id, { supplierId: id, supplierName: lt.suppliersById.get(id)?.supplier_name ?? id, parts: new Set(), groups: [], exposure: 0, groupFailures: 0, fails: [] });
+    }
+    return bySupplier.get(id);
+  };
+  for (const f of lt.failures) if (f.supplierId) ensure(f.supplierId).fails.push(f);
+  for (const sp of lt.suspensions) if (sp.supplierId) ensure(sp.supplierId).parts.add(sp.partId);
+  for (const p of summaries) {
+    for (const s of p.suppliers) {
+      if (!s.supplierId) continue;
+      const g = ensure(s.supplierId);
+      g.parts.add(p.partId);
+      g.exposure += s.exposure ?? 0;
+      g.groupFailures += s.failures;
+      const rated = s.failures >= MIN_GROUP_FAILURES && s.fieldB10 !== null && p.designKm;
+      g.groups.push({
+        partId: p.partId,
+        partName: p.partName,
+        subsystem: p.subsystem,
+        failures: s.failures,
+        fieldB10: s.fieldB10,
+        extrapolated: s.extrapolated,
+        designKm: p.designKm,
+        pctOfDesign: rated ? (s.fieldB10 / p.designKm) * 100 : null,
+        ratePer100k: s.ratePer100k,
+        status: s.status,
+      });
+    }
+  }
+  return [...bySupplier.values()]
+    .map((g) => {
+      for (const f of g.fails) g.parts.add(f.partId);
+      const rated = g.groups.filter((x) => x.pctOfDesign !== null).sort((a, b) => a.pctOfDesign - b.pctOfDesign);
+      const pcts = rated.map((x) => x.pctOfDesign);
+      const mid = pcts.length / 2;
+      const medianPct = pcts.length ? (pcts.length % 2 ? pcts[Math.floor(mid)] : (pcts[mid - 1] + pcts[mid]) / 2) : null;
+      const n = g.fails.length;
+      const downtimes = g.fails.map((f) => f.downtime).filter((v) => v !== null && v !== undefined);
+      return {
+        supplierId: g.supplierId,
+        supplierName: g.supplierName,
+        partsSupplied: g.parts.size,
+        ratedParts: rated.length,
+        belowDesign: rated.filter((x) => x.pctOfDesign < 100).length,
+        medianPct,
+        worst: rated[0] ?? null,
+        failures: n,
+        ratePer100k: g.exposure > 0 ? (g.groupFailures / g.exposure) * 1e5 : null,
+        meanDowntime: mean(downtimes),
+        cost: g.fails.reduce((sum, f) => sum + (f.cost || 0), 0),
+        status: medianPct === null ? "Insufficient Data" : hazardStatus(medianPct - 100, MIN_GROUP_FAILURES),
+        groups: g.groups.sort((a, b) => (a.pctOfDesign ?? 1e9) - (b.pctOfDesign ?? 1e9) || b.failures - a.failures),
+      };
+    })
+    .sort((a, b) => (a.medianPct ?? 1e9) - (b.medianPct ?? 1e9) || (b.ratePer100k ?? 0) - (a.ratePer100k ?? 0));
+}
+
 export function supplierScorecard(summaries, limit = 15) {
   const rows = [];
   for (const p of summaries) {
@@ -509,6 +575,7 @@ export function supplierScorecard(summaries, limit = 15) {
         partId: p.partId,
         label: `${p.partName} · ${s.supplierName}`,
         partName: p.partName,
+        supplierId: s.supplierId,
         supplierName: s.supplierName,
         pctOfDesign: (s.fieldB10 / p.designKm) * 100,
         fieldB10: s.fieldB10,
@@ -522,10 +589,22 @@ export function supplierScorecard(summaries, limit = 15) {
 }
 
 /** Build-quarter × age-at-failure matrix: failures per 100 trucks of the cohort that reached that age. */
-export function cohortMatrix(lt, latestDate) {
+/**
+ * Build cohort × age at failure. opts: grain "quarter" | "year"; modelId limits trucks (exposure and
+ * failures); partId, subsystem and supplierId limit the failures counted (exposure stays all trucks
+ * of the cohort).
+ */
+export function cohortMatrix(lt, latestDate, { grain = "quarter", modelId = "all", partId = "all", subsystem = "all", supplierId = "all" } = {}) {
+  const cohortOf = (date) => (grain === "year" ? (date ? String(date).slice(0, 4) : null) : quarterOf(date));
+  const truckOk = (v) => v && (modelId === "all" || v.model_id === modelId);
+  const failureOk = (f) =>
+    (partId === "all" || f.partId === partId) &&
+    (supplierId === "all" || f.supplierId === supplierId) &&
+    (subsystem === "all" || lt.partsById.get(f.partId)?.vehicle_subsystem === subsystem);
   const cohorts = new Map();
   for (const v of lt.vehicles.values()) {
-    const q = quarterOf(v.production_date);
+    if (!truckOk(v)) continue;
+    const q = cohortOf(v.production_date);
     if (!q) continue;
     const c = cohorts.get(q) ?? { id: q, label: q, trucks: [], ages: [] };
     c.trucks.push(v.vehicle_id);
@@ -534,7 +613,9 @@ export function cohortMatrix(lt, latestDate) {
   }
   const counts = new Map();
   for (const f of lt.failures) {
-    const q = quarterOf(lt.vehicles.get(f.vehicleId)?.production_date);
+    const v = lt.vehicles.get(f.vehicleId);
+    if (!truckOk(v) || !failureOk(f)) continue;
+    const q = cohortOf(v.production_date);
     const bucket = AGE_BUCKETS.find((b) => f.ageMonths >= b.min && f.ageMonths < b.max);
     if (!q || !bucket) continue;
     const key = `${q}|${bucket.id}`;
@@ -640,6 +721,8 @@ export function mainCauses(lt, summaries, topParts = MAIN_CAUSE_PARTS) {
     return {
       partId: p.partId,
       partName: p.partName,
+      subsystem: p.subsystem ?? lt.partsById.get(p.partId)?.vehicle_subsystem ?? null,
+      partType: p.partType ?? lt.partsById.get(p.partId)?.part_type ?? null,
       failures: total,
       main,
       second: modes[1] ?? null,
@@ -677,7 +760,7 @@ export function precursorMatrix(raw, lt) {
   const rows = [...failuresByPart.entries()]
     .filter(([, n]) => n >= MIN_PRECURSOR_FAILURES)
     .sort((a, b) => b[1] - a[1])
-    .map(([id, n]) => ({ id, label: partNames.get(id) ?? id, failures: n }));
+    .map(([id, n]) => ({ id, label: partNames.get(id) ?? id, failures: n, subsystem: lt.partsById.get(id)?.vehicle_subsystem ?? null }));
   const cols = [...signals].sort().map((s) => ({ id: s, label: s }));
   let max = 0;
   const out = new Map();

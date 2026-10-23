@@ -1,17 +1,19 @@
 import React, { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Factory, Microscope, TrendingDown } from "lucide-react";
+import { Factory, Layers, Microscope, TrendingDown } from "lucide-react";
 import { useReliabilityData } from "../../hooks/useReliabilityData";
 import { useFilterStore } from "../../store/useFilterStore";
 import { buildLifeTable, partSummaries } from "./reliabilityMetrics";
 import FieldLifeTab from "./FieldLifeTab";
 import SupplierQualityTab from "./SupplierQualityTab";
+import BuildQualityTab from "./BuildQualityTab";
 import RootCauseTab from "./RootCauseTab";
 import PartView from "./PartView";
 
 const TABS = [
   { id: "life", label: "Field Life", icon: TrendingDown, component: FieldLifeTab },
-  { id: "quality", label: "Supplier & Build Quality", icon: Factory, component: SupplierQualityTab },
+  { id: "supplier", label: "Supplier Quality", icon: Factory, component: SupplierQualityTab },
+  { id: "build", label: "Build Quality", icon: Layers, component: BuildQualityTab },
   { id: "cause", label: "Root Cause", icon: Microscope, component: RootCauseTab },
 ];
 
@@ -25,7 +27,9 @@ export default function ReliabilityModule() {
   const navigate = useNavigate();
   const setSelectedVin = useFilterStore((s) => s.setSelectedVin);
   const [params, setParams] = useSearchParams();
-  const tabId = TABS.some((t) => t.id === params.get("tab")) ? params.get("tab") : TABS[0].id;
+  // "quality" was the combined Supplier & Build Quality tab until 2026-10-23; old links land on Supplier Quality.
+  const requestedTab = params.get("tab") === "quality" ? "supplier" : params.get("tab");
+  const tabId = TABS.some((t) => t.id === requestedTab) ? requestedTab : TABS[0].id;
   const partId = params.get("part");
   const Tab = TABS.find((t) => t.id === tabId).component;
 

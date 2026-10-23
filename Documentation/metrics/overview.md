@@ -5,7 +5,7 @@
 > - Code: `src/hooks/useOverviewData.js` and `src/modules/overview/OverviewModule.jsx`
 > - Module status: **Implemented (new data model)**
 > - Audience: OEM service / uptime engineer (risk first), with fleet uptime
-> - Last updated: 2026-10-01
+> - Last updated: 2026-10-22
 
 ## Principles
 - **Fleet View only.** A truck selected elsewhere (`selectedVin`) does not change the Overview.
@@ -93,21 +93,25 @@
 | Formula | `count(v) group by band(worst(v).p)` |
 | Click | a slice filters the action list to that band |
 
-### C2 · Early-Warning Trend (PERIOD)
+### C2 · Early-Warning Trend
+Removed 2026-10-22.
+
+### C5 · Predicted vs Breakdown Repairs (MONTHLY)
 | | |
 |---|---|
-| Visual | 2 lines, one point per day of the period |
-| Formula | for day d: `alerts(d−6..d) / N × 100` and `serious DTC events first seen (d−6..d) / N × 100` |
-| Tooltip | per-100 values plus raw counts |
-| Why | normalised by fleet size; alerts rising before DTCs shows the model warns early |
+| Visual | stacked bars, one per calendar month, last 6 months with data |
+| Source | `fact_repair_orders` where `data_source = 'telematics_sim'`, `vehicle_id` in the connected trucks in scope, `visit_type IN ('predicted','breakdown')`, `date_id` in the last 200 days |
+| Formula | per month: `count(visit_type = 'predicted')` and `count(visit_type = 'breakdown')`; tooltip shows predicted ÷ (predicted + breakdown) |
+| Filters | follows the global filters (region, model, powertrain, application, customer type) but **not** the date range; planned and other repair visits are excluded |
+| Caveat | `visit_type` is assigned by the simulator (a fault is "predicted" if it was detected, 72 % Fleetboard / 50 % other, and repaired before its failure day), so the shift is built into the data. There are no predicted repairs before July 2026 because the predictive model only runs once telematics is live. The label is not matched to individual alerts |
 
 ### C3 · Region × Model Risk Matrix (NOW)
 | | |
 |---|---|
 | Visual | CSS-grid heatmap: rows = `region_name`, columns = `model_label` |
-| Cell | `atRisk / total` trucks in that region × model, as % (rose intensity saturates at 30 %) |
+| Cell | `count / total` trucks in that region × model, as %. `count` = trucks whose worst-part band equals the band selected in the card header: **Critical** (default), High, Medium or Low. Colour follows the band (rose, amber, sky, green) and saturates at 15 % (Critical, High), 40 % (Medium) or 100 % (Low) |
 | Rules | 0 % cells are neutral; cells with `total < 5` are grey "—" (not rated) |
-| Click | filters the action list by region and model |
+| Click | filters the action list by region, model and the selected band |
 
 ### C4 · Top Predicted Failures by Part (NOW)
 | | |

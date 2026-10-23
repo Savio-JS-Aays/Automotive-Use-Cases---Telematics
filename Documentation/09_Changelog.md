@@ -3,7 +3,123 @@
 > Dated record of feature, data-model and documentation changes. Add an entry for every
 > change, newest first.
 >
-> Last updated: 2026-10-21
+> Last updated: 2026-10-23
+
+## 2026-10-23 — Health map aggregated by model and application
+- **Vehicle Diagnostics → Signal Health:** the Truck × Signal Health Map has a Trucks / Models / Applications toggle. Grouped rows show the share of trucks in warning or critical per signal; a cell click drills back to the matching trucks sorted by that signal. New `signalHeatGroups`; heatmap rows carry model ID and application.
+
+## 2026-10-23 — Table design refresh
+- **All modules:** record tables share one look (new `src/components/ui/tableStyle.js`): padded card with title, subtitle and divider; a large search box with "Showing x of y records" and CSV; framed table with a grey uppercase header, roomier rows and a bold first column. Applied through the shared `DataTable` (Telematics, Diagnostics, Reliability tables) and to the Overview Workshop Action List. Supply Chain's Reorder & Allocation Master and Financial's Financial Exposure Master now use `DataTable`, so they gain search, sorting, a record count and CSV export.
+
+## 2026-10-23 — Repeat and In warranty removed from the Supplier Quality Table
+- **Component Reliability → Supplier Quality:** the Repeat and In warranty columns (and their calculations in `supplierTable`) are removed from the table and its CSV.
+
+## 2026-10-23 — Supplier Quality table; Supplier and Build Quality tabs split
+- **Component Reliability:** "Supplier & Build Quality" is now two tabs. **Supplier Quality** (`?tab=supplier`) has the Supplier Scorecard and a new **Supplier Quality Table** (`supplierTable`): one row per supplier with status, parts, rated / below-design parts, median % of design, worst part, failures, failures per 100k km, repeat %, downtime per failure, parts cost and in-warranty share; a row opens a pop-up of the supplier's parts with a "Show in scorecard" link. **Build Quality** (`?tab=build`, new `BuildQualityTab.jsx`) has Build Cohort × Age at Failure and Where Parts Fail. Old `?tab=quality` links open Supplier Quality.
+
+## 2026-10-23 — "TELEMATICS" header; Root Cause layout
+- **App header:** the "Fleet Pulse" name and its icon are replaced by the word "TELEMATICS"; the browser tab title is "Telematics".
+- **Component Reliability → Root Cause:** Main Failure Cause by Part and Precursor Ramp are stacked full width, one below the other. Precursor Ramp has no pagination (all qualifying parts in one grid); its filters stay.
+
+## 2026-10-23 — Root Cause: all parts, pagination, filters and search
+- **Component Reliability → Root Cause:** Main Failure Cause by Part lists every part with failures (no top-10 cap) with search, subsystem and clear-target filters, a sort switch and pages of 10. Precursor Ramp gets search, subsystem, signal and minimum-ramp filters and pages of 10. `mainCauses` and `precursorMatrix` rows carry the part's subsystem.
+
+## 2026-10-23 — Fix: Supplier & Build Quality tab crash
+- **Component Reliability → Supplier & Build Quality:** the tab crashed with "cohorts is not defined" after the cascading-filter change dropped the line that builds the cohort matrix. Restored. A `no-undef` lint over `src/` (oxlint) finds no other undefined names.
+
+## 2026-10-23 — Cohort filters cascade fully
+- **Component Reliability → Build Cohort × Age at Failure:** the filters now cascade model → subsystem → part → supplier. Each list only offers values found in the failures that match the filters above it (so a subsystem narrows the suppliers even with no part chosen), and changing a filter clears the ones below it.
+
+## 2026-10-23 — Build Cohort × Age at Failure filters
+- **Component Reliability → Supplier & Build Quality:** the cohort heatmap has a Quarter / Year grain switch and Model, Subsystem, Part and Supplier filters (cascading part and supplier lists). `cohortMatrix` takes options.
+
+## 2026-10-23 — Supplier filter on the Supplier Scorecard
+- **Component Reliability → Supplier & Build Quality:** the Supplier Scorecard has a Supplier select. All suppliers keeps the worst-15 view; one supplier lists all its rated parts with a summary subtitle (rated parts, below design, median % of design). `supplierScorecard` rows now carry `supplierId`.
+
+## 2026-10-23 — Signal Health charts hidden again
+- **Vehicle Diagnostics → Signal Health:** Signals vs Normal Band and the Anomaly → DTC Lead Time histogram are hidden again (`SHOW` flags off). The Anomaly → DTC Lead Time KPI card and the Signal Watchlist stay.
+
+## 2026-10-22 — Signal Health: two charts restored, Signal Watchlist added
+- **Vehicle Diagnostics → Signal Health:** Signals vs Normal Band and the Anomaly → DTC Lead Time histogram are visible again (`SHOW` flags on; the histogram is taller to sit beside the band chart). New **Signal Watchlist** table (`signalWatchlist`): every truck × signal outside its normal band, with state, days out of band, 14-day trend, linked active fault code and likely part.
+
+## 2026-10-22 — Anomalous Reading Rate KPI removed
+- **Vehicle Diagnostics → Signal Health:** the Anomalous Reading Rate card is removed; the KPI row is now four cards.
+
+## 2026-10-22 — Fault matrix cell pop-up
+- **Vehicle Diagnostics → Fault Codes:** clicking a Faults by System × group cell opens a pop-up with that cell's fault codes (ranked, click for the code panel) and its events (truck, fault, lamp, severity, first seen, status; searchable; click opens the truck), instead of filtering the Active Fault Codes table. New `systemMatrixCell`, sharing the matrix's filter logic.
+
+## 2026-10-22 — Fault matrix filters; scrolling Most Common Faults
+- **Vehicle Diagnostics → Fault Codes:** Faults by System × Model gains filters for rows (Model / Region / Application), scope (New in period / Active now), severity and lamp colour; cell clicks filter the table by the chosen group. Most Common Faults shows the top 30 in a scrolling list so its card aligns with the matrix. `systemModelMatrix` takes options; `topFaults` takes a `limit`; active-code rows carry region and application.
+
+## 2026-10-22 — Date filter on the single-truck completeness trend
+- **Telematics → Asset View:** Data Completeness Trend has its own date range (Page period, 7 / 30 / 90 days, Custom from–to) and loads the truck's packet counts for that range (new `useVehicleCompleteness`, which replaces the unused `useVehicleDayTrace`).
+
+## 2026-10-22 — Rolling line removed from the single-truck completeness trend
+- **Telematics → Asset View:** the Data Completeness Trend shows only the daily completeness line (with day markers up to 31 days); the 7-day rolling line and the legend are removed.
+
+## 2026-10-22 — Unit source removed from the Connectivity Watchlist
+- **Telematics → Data Health:** the Unit Source column is removed from the Connectivity Watchlist table and its CSV export.
+
+## 2026-10-22 — Single-truck completeness trend
+- **Telematics → Asset View (Trips & driving):** new Data Completeness Trend for the selected truck (daily and rolling 7-day packets received ÷ expected, 95 % target), beside Daily Distance & Engine Hours. New `assetCompletenessTrend`.
+
+## 2026-10-22 — Completeness charts merged
+- **Telematics → Data Health:** Completeness Trend and Completeness by Group are merged into one full-width "Completeness Trend by Region / Model": one 7-day rolling line per region or model, a dashed fleet line and the 95 % target. The "Unit source" grouping is removed. New `completenessTrendBy`; `completenessBy` removed.
+
+## 2026-10-22 — Event Rate by Family filters
+- **Telematics → Driver Safety:** Event Rate by Family has its own model, region and application filters and a 7-day / Daily smoothing switch. The truck filters restrict both events and km. `eventRateTrend` takes an optional `{ vehicleIds, windowDays }`.
+
+## 2026-10-22 — Driver Safety drill-downs as pop-ups; layout
+- **Telematics → Driver Safety:** the Safety by Group and Time in Speed Bands drill-downs open in a pop-up (new shared `Modal`) instead of expanding under the chart, so cards keep their size. Event Rate by Family now stretches to the height of Safety by Group beside it, removing the empty space under it.
+
+## 2026-10-22 — Safety charts merged into one band chart
+- **Telematics → Driver Safety:** "Safety Risk by group" and "Truck Safety Score Distribution" are merged into "Safety by Group: Score Bands & Event Rate". Each group row is a 100 % stacked bar of its trucks across Coach now / Watch / Good, with events per 1,000 km on the right. Clicking a band lists the trucks in it (search, band switch, click-through). New `safetyBandsByGroup`; `safetyDistribution` removed. Time in Speed Bands now sits beside Event Type × Severity.
+
+## 2026-10-22 — Safety score distribution by truck; speed-band drill-down search
+- **Telematics → Driver Safety:** "Driver Safety Score Distribution" is now "Truck Safety Score Distribution". It counts trucks (period score from `truckStats`) instead of drivers and has model and region filters plus "Rate trucks with" in its header. `safetyDistribution` now takes any items and returns `count`.
+- **Time in Speed Bands drill-down:** search box over the truck list (VIN, vehicle ID, model).
+
+## 2026-10-22 — Time in Speed Bands: vehicle type and truck drill-down
+- **Telematics → Driver Safety:** Time in Speed Bands can be grouped by vehicle type as well as application and model. Clicking a group or one of its band segments lists every truck in that group with its own speed-band bar, sorted by the clicked band; truck rows open the Asset View. `RankedBars` gained an `onSegmentClick` prop, and `DriverSafetyTab` now receives `onOpenAsset`.
+
+## 2026-10-22 — Driver Safety filters moved next to the charts they change
+- **Telematics → Driver Safety:** the top filter bar looked global but only changed some charts, so it is split up. The event filter (families, severity, clicked event-type chip) now sits in a shaded panel with the only two charts it filters: Event Rate by Family and Safety Risk by group. Group by moved into the Safety Risk header, and "Rate drivers with" into the Driver Safety Score Distribution header. The KPI cards no longer follow the event filter: Events per 1,000 km and High-Severity Events always count all events.
+
+## 2026-10-22 — Primary driver removed from the Fleet Roster
+- **Telematics → Utilization & Uptime → Fleet Roster:** the Primary Driver column is removed and search no longer matches driver aliases (also dropped from the CSV export). The Asset View header and the Driver Safety tab still use pseudonymised driver data.
+
+## 2026-10-22 — Utilization tab heatmap colours
+- **Telematics → Utilization & Uptime:** the Activity Heatmap is now cyan and the dimension matrix uses indigo for Utilization and sky blue for Drive (Idle amber and PTO violet unchanged), so neither heat grid is green.
+
+## 2026-10-22 — Utilization Distribution removed
+- **Telematics → Utilization & Uptime:** the Utilization Distribution chart, `utilizationDistribution`, `UTILIZATION_BANDS` and the utilization-band roster filter are removed. The dimension matrix now spans the full width of its row.
+
+## 2026-10-22 — Utilization by Application removed
+- **Telematics → Utilization & Uptime:** the Utilization by Application chart and `utilizationByApplication` are removed. The same view is available in the matrix (Analyse = Application, column "All …" totals). 
+
+## 2026-10-22 — Utilization matrix: Analyse / Across / Metric
+- **Telematics → Utilization & Uptime:** the Region × Model Utilization heat grid is now a configurable matrix. Analyse and Across choose any two of Region, Vehicle Type, Model, Application and Powertrain; Metric chooses Utilization, Drive, Idle or PTO hours per truck-day. It adds row, column and grand totals, a search box, a colour legend, and roster cross-filters for vehicle type and powertrain. `vehicle_type` is now fetched from `v_vehicle_context`; `driveH` and `ptoH` were added to the per-truck stats. Details in `metrics/telematics.md`.
+
+## 2026-10-22 — Hover values on every chart
+- **All modules:** ranked-bar rows, donut slices and legend rows, heatmap cells and Overview risk-matrix cells now show their value in a tooltip that follows the pointer (new shared `Hover` component). Ranked bars without custom hover text show each segment's value and the total. Recharts charts already had tooltips and are unchanged.
+
+## 2026-10-22 — Column-chart design refresh
+- **All modules:** vertical bar charts share one style from `src/components/ui/barStyle.js`: wider bars with rounded tops, the value above each bar (stack totals on top; omitted when a chart has more than 16 bars), bold category labels, a light value axis on the right and horizontal grid lines only. Colours are unchanged.
+- **Restyled:** Overview (Predicted vs Breakdown Repairs), Telematics (Daily Drive / Idle / PTO hours, Utilization Distribution, Driver Safety Score Distribution, Asset View Daily Distance & Engine Hours), Vehicle Diagnostics (Anomaly → DTC Lead Time), Component Reliability (Hazard Rate by km), Financial & Warranty (Cost by Telematics Anomaly).
+
+## 2026-10-22 — Chart design refresh: donuts and ranked bars
+- **All modules:** donut charts and horizontal-bar rankings use two new shared components, `DonutBreakdown` (centre total, rounded legend rows with value, share and progress bar) and `RankedBars` (label and value above a thick rounded track; stacked, grouped or single series; dashed reference marker; hover detail; click). `ChartHeader` now has a bold title, optional subtitle and a divider.
+- **Converted:** Overview (Fleet Risk Posture, Top Predicted Failures by Part), Telematics (Utilization by application, Data Completeness by group, Safety Risk by group, Speed Bands, Idle Share by group, Diesel Split, Charging Mix), Vehicle Diagnostics (Most Common Faults, Fault Lifecycle), Component Reliability (Supplier Scorecard), Supply Chain (Stock vs Demand by location, Region-wise Urgency), Financial & Warranty (Exposure by Subsystem, Top Cost Components).
+- **Unchanged:** line, area, scatter and vertical-bar charts remain Recharts charts. Axis ticks are replaced by value labels on the converted charts, so a few lose an explicit scale. `docs/UI_Guide.md` is updated with the new rules.
+
+## 2026-10-22 — Predicted vs Breakdown Repairs chart added
+- **Overview:** new monthly stacked-bar chart of predicted versus breakdown repair orders (last 6 months, filters apply but not the date range). It adds one query on `fact_repair_orders` (tagged `telematics_sim`) to `useOverviewData.js`. The label comes from `visit_type`, which the simulator assigns; it is not matched to individual alerts. Formula and caveats are in `metrics/overview.md` (C5).
+
+## 2026-10-22 — Early-Warning Trend removed
+- **Overview:** the Early-Warning Trend chart (prediction alerts and major / critical DTCs per 100 trucks, rolling 7 days) is removed, together with the separate query for `trigger = 'alert'` rows in `useOverviewData.js`.
+
+## 2026-10-22 — Region × Model Risk Matrix band filter (Critical / High / Medium / Low)
+- **Overview:** the Region × Model Risk Matrix has a Critical / High / Medium / Low switch in its header (default Critical). The earlier combined Critical + High option is removed. Each cell shows the share of trucks in the selected band, coloured by that band, and clicking a cell filters the action list by region, model and band.
 
 ## 2026-10-21 — Day Trace: Speed & Fuel Level and Safety Score card removed
 - **Telematics → Asset View:** the Day Trace chart (speed, fuel level / state of charge, harsh-event dots, day chips, trip zoom) is removed. The Trip Log rows are no longer clickable, since their only action was to zoom the trace. `useVehicleDayTrace` and `fact_vehicle_status` are no longer used by the dashboard.

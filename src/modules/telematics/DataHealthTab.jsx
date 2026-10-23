@@ -1,10 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { Radio, RadioTower, SignalLow, WifiOff } from "lucide-react";
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
+  Legend,
   Line,
   LineChart,
   ReferenceLine,
@@ -14,19 +12,19 @@ import {
   YAxis,
 } from "recharts";
 import KpiCard from "../../components/kpi/KpiCard";
-import { LOW_COMPLETENESS_PCT, SILENT_HOURS, completenessBy, completenessTrend, dataHealthKpis, dataNow } from "./telematicsMetrics";
-import { AXIS_LINE, AXIS_TICK, GRID_STROKE, STATUS_STYLES, formatAgo, formatDay, formatNumber, formatPct, truncateString } from "./telematicsFormat";
+import { LOW_COMPLETENESS_PCT, SILENT_HOURS, completenessTrendBy, dataHealthKpis, dataNow } from "./telematicsMetrics";
+import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, STATUS_STYLES, formatAgo, formatDay, formatNumber, formatPct } from "./telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill, Segmented } from "./TelematicsUi";
 
 const TARGET_PCT = 95;
+const SERIES_COLORS = ["#e11d48", "#f59e0b", "#8b5cf6", "#0ea5e9", "#14b8a6", "#6366f1", "#ec4899", "#84cc16"];
 
 export default function DataHealthTab({ raw, trucks, loading, onOpenAsset }) {
   const [groupBy, setGroupBy] = useState("region");
   const [onlyIssues, setOnlyIssues] = useState(true);
 
   const kpis = useMemo(() => dataHealthKpis(raw, trucks), [raw, trucks]);
-  const trend = useMemo(() => completenessTrend(raw), [raw]);
-  const grouped = useMemo(() => completenessBy(trucks, groupBy), [trucks, groupBy]);
+  const trend = useMemo(() => completenessTrendBy(raw, groupBy), [raw, groupBy]);
   const now = useMemo(() => dataNow(raw), [raw]);
 
   const rows = useMemo(
@@ -37,7 +35,10 @@ export default function DataHealthTab({ raw, trucks, loading, onOpenAsset }) {
     [trucks, onlyIssues]
   );
 
-  const trendMin = trend.reduce((m, p) => (p.value !== null && p.value < m ? p.value : m), 100);
+  const trendMin = trend.data.reduce((m, p) => {
+    for (const [k, v] of Object.entries(p)) if (k !== "date" && v !== null && v < m) m = v;
+    return m;
+  }, 100);
 
   return (
     <div className="space-y-4">
@@ -87,75 +88,62 @@ export default function DataHealthTab({ raw, trucks, loading, onOpenAsset }) {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard
-          title="Completeness Trend"
-          badge="PERIOD"
-          tooltip={`7-day rolling packets received ÷ expected across the scope. The dashed line is the ${TARGET_PCT}% reliability target.`}
-        >
-          {loading ? (
-            <ChartSkeleton />
-          ) : trend.length === 0 ? (
-            <EmptyChart message="No data in this period." />
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={trend}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                <XAxis dataKey="date" tickFormatter={formatDay} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={24} />
-                <YAxis
-                  domain={[Math.max(0, Math.floor(Math.min(trendMin, TARGET_PCT) - 2)), 100]}
-                  unit="%"
-                  tick={AXIS_TICK}
-                  axisLine={AXIS_LINE}
-                  tickLine={false}
-                  width={44}
+      <ChartCard
+        title={`Completeness Trend by ${groupBy === "model" ? "Model" : "Region"}`}
+        subtitle="7-day rolling packets received ÷ expected; dark dashed line = whole fleet, green = 95 % target"
+        badge="PERIOD"
+        tooltip={`One line per ${groupBy === "model" ? "model" : "region"} (legend ordered weakest first) plus the fleet. A region that dips on its own points at network coverage; a model that sits low points at the telematics hardware or its integration. Below the ${TARGET_PCT}% target the other KPIs for that group become less reliable.`}
+        actions={
+          <Segmented
+            value={groupBy}
+            onChange={setGroupBy}
+            options={[
+              { value: "region", label: "Region" },
+              { value: "model", label: "Model" },
+            ]}
+          />
+        }
+      >
+        {loading ? (
+          <ChartSkeleton />
+        ) : trend.data.length === 0 ? (
+          <EmptyChart message="No data in this period." />
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={trend.data}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
+              <XAxis dataKey="date" tickFormatter={formatDay} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} minTickGap={24} />
+              <YAxis
+                domain={[Math.max(0, Math.floor(Math.min(trendMin, TARGET_PCT) - 2)), 100]}
+                unit="%"
+                tick={AXIS_TICK}
+                axisLine={AXIS_LINE}
+                tickLine={false}
+                width={44}
+              />
+              <RechartsTooltip
+                labelFormatter={(d) => `7 days to ${formatDay(d)}`}
+                formatter={(v, name) => [v === null ? "—" : `${v}%`, name]}
+                itemSorter={(item) => item.value ?? 101}
+              />
+              <Legend verticalAlign="bottom" height={32} iconType="plainline" wrapperStyle={LEGEND_STYLE} />
+              <ReferenceLine y={TARGET_PCT} stroke="#10b981" strokeDasharray="4 4" />
+              {trend.groups.map((g, i) => (
+                <Line
+                  key={g.id}
+                  dataKey={g.id}
+                  name={`${g.label} (${g.completeness === null ? "—" : g.completeness.toFixed(1)}%)`}
+                  stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
+                  strokeWidth={1.75}
+                  dot={false}
+                  connectNulls
                 />
-                <RechartsTooltip labelFormatter={(d) => `7 days to ${formatDay(d)}`} formatter={(v) => [`${v}%`, "Completeness"]} />
-                <ReferenceLine y={TARGET_PCT} stroke="#10b981" strokeDasharray="4 4" />
-                <Line dataKey="value" stroke="#0ea5e9" strokeWidth={2} dot={false} connectNulls />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
-        <ChartCard
-          title="Completeness by Group"
-          badge="PERIOD"
-          tooltip="Completeness per region, telematics unit source or model, weakest first. Regional gaps point at network coverage; a source or model gap points at the hardware or its integration."
-          actions={
-            <Segmented
-              value={groupBy}
-              onChange={setGroupBy}
-              options={[
-                { value: "region", label: "Region" },
-                { value: "source", label: "Unit source" },
-                { value: "model", label: "Model" },
-              ]}
-            />
-          }
-        >
-          {loading ? (
-            <ChartSkeleton />
-          ) : grouped.length === 0 ? (
-            <EmptyChart message="No trucks in scope." />
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={grouped} layout="vertical" margin={{ left: 4, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" unit="%" domain={[Math.max(0, Math.floor(Math.min(...grouped.map((g) => g.completeness)) - 3)), 100]} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <YAxis type="category" dataKey="name" width={130} tickFormatter={(v) => truncateString(v, 20)} tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={false} />
-                <RechartsTooltip cursor={{ fill: "#f8fafc" }} formatter={(v, _n, item) => [`${v}% · ${item.payload.trucks} trucks`, "Completeness"]} />
-                <ReferenceLine x={TARGET_PCT} stroke="#10b981" strokeDasharray="4 4" />
-                <Bar dataKey="completeness" radius={[0, 3, 3, 0]}>
-                  {grouped.map((g) => (
-                    <Cell key={g.name} fill={g.completeness < TARGET_PCT ? "#f59e0b" : "#0ea5e9"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-      </div>
+              ))}
+              <Line dataKey="fleet" name="Fleet" stroke="#0f172a" strokeWidth={2.5} strokeDasharray="6 4" dot={false} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </ChartCard>
 
       <DataTable
         title="Connectivity Watchlist"
@@ -190,7 +178,6 @@ export default function DataHealthTab({ raw, trucks, loading, onOpenAsset }) {
               </>
             ),
           },
-          { key: "source", label: "Unit Source", sortValue: (r) => r.telematicsSource, csv: (r) => r.telematicsSource, render: (r) => r.telematicsSource ?? "—" },
           { key: "status", label: "Status", sortValue: (r) => r.status, csv: (r) => r.status, render: (r) => <Pill className={STATUS_STYLES[r.status]}>{r.status}</Pill> },
           {
             key: "completeness",

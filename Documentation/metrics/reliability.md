@@ -8,7 +8,7 @@
 >   - `src/modules/reliability/reliabilityMetrics.js`: every formula below;
 >   - UI in `modules/reliability/*.jsx`.
 > - Module status: **Implemented (new data model)**, 2026-10-01
-> - Last updated: 2026-10-21
+> - Last updated: 2026-10-23
 
 ## Hidden charts (2026-10-01)
 These charts are hidden with `SHOW` flags. Their formulas below remain valid; β, η and field B10
@@ -34,7 +34,8 @@ still appear in the KPI cards and in the Variance Master table.
   - `bridge_dtc_part`;
   - `v_failure_precursor_summary`;
   - `v_failure_precursor`, loaded for one part in Part View.
-- **Tabs:** `?tab=life` (default), `?tab=quality`, `?tab=cause`.
+- **Tabs:** `?tab=life` (default), `?tab=supplier`, `?tab=build`, `?tab=cause`. The old `?tab=quality`
+  (combined Supplier & Build Quality, split 2026-10-23) opens Supplier Quality.
 - **Part View:** `?part=<part_id>`.
 
 ## Constants
@@ -121,12 +122,33 @@ used and flagged "extrapolated".
   failures, running (suspensions), field B10 (and the extrapolated flag), design B10,
   variance, rate per 100k km and hazard status. Clicking a row opens Part View; CSV export.
 
-## Tab 2 · Supplier & Build Quality
+## Tab 2 · Supplier Quality
 - **Supplier Scorecard.**
   - part × supplier groups with ≥ 5 failures: field B10 ÷ design B10 × 100, the worst 15;
   - single colour, no supplier risk tier (removed 2026-10-21); labelled with n;
+  - **Supplier filter (2026-10-23):** "All suppliers" shows the worst 15 groups (default); picking a
+    supplier shows all of that supplier's rated parts, labelled by part, with a subtitle of rated parts,
+    parts below design and the median % of design;
   - a reference line marks 100 %.
 - **Risk Tier Check.** Removed 2026-10-21.
+- **Supplier Quality Table** (2026-10-23, `supplierTable`). One row per supplier over the trucks in scope:
+  - **Parts:** distinct parts the supplier has in the field (failures and running parts).
+  - **Rated / below design:** part × supplier groups with ≥ 5 failures and a field B10, and how many
+    of them are below 100 % of design.
+  - **Median % of design:** median of `field B10 ÷ design B10 × 100` over the rated groups; **Worst part**
+    is the lowest. "—" when nothing is rated.
+  - **Failures:** the supplier's replacements. **Per 100k km:** Σ failures ÷ Σ km of part life of its
+    part groups that had a failure × 100,000 (fair across supplier sizes).
+  - **Downtime / failure:** mean repair-order downtime. **Parts cost:** Σ `part_cost_inr`.
+    (Repeat % and in-warranty share were removed 2026-10-23.)
+  - **Status:** `hazardStatus(median % − 100)`: Critical < −20, Watch < 0, On Spec ≥ 0; Insufficient
+    Data when nothing is rated.
+  - Default sort worst first (median % of design, then rate); search (supplier or part); CSV.
+  - **Click a row:** pop-up with the supplier's parts (failures, field and design B10, % of design,
+    rate, status); a part opens Part View; "Show in scorecard" sets the scorecard's supplier filter.
+
+## Tab 3 · Build Quality
+Split from the combined Supplier & Build Quality tab on 2026-10-23 (`BuildQualityTab.jsx`).
 - **Build Cohort × Age at Failure.** Heatmap.
   - rows = production quarter (`production_date`), with the truck count;
   - columns = vehicle age at failure (`vehicle_age_days` ÷ 30.4375): 0–12 / 12–24 / 24–36 /
@@ -134,16 +156,24 @@ used and flagged "extrapolated".
   - cell = failures ÷ cohort trucks whose current age (latest date − `in_service_date`) ≥ the
     bucket start × 100;
   - greyed if fewer than 5 trucks are exposed; blank if none are.
+  - **Filters (2026-10-23):** build grain Quarter (default) / Year; Model (limits trucks and failures);
+    Subsystem, Part and Supplier as a cascade (model → subsystem → part → supplier: each list offers
+    only values present in the failures matching the filters above it, and changing a filter resets the
+    ones below), which limit the
+    failures counted while the exposure stays all trucks of the cohort that reached the age. A
+    supplier view is therefore failures per 100 trucks built, not per 100 of that supplier's parts.
 - **Where Parts Fail.** Heatmap of the top 12 parts × application, region or model (toggle).
   - cell = failures ÷ exposure km of that group × 10⁵;
   - greyed if fewer than 5 trucks; clicking a cell opens Part View.
 
-## Tab 3 · Root Cause
+## Tab 4 · Root Cause
 - **Main Failure Cause by Part.** A ranked list (replaced the stacked "Failure-Mode Mix (Top 10
   Parts)" bars on 2026-10-01: up to ~20 failure modes across 10 parts needed a 12-colour legend and
   was hard to read).
-  - One row per part, for the `MAIN_CAUSE_PARTS` = 10 parts with the most failures (the same
-    ordering as the Field Life summaries).
+  - One row per part, for **every part with failures** (2026-10-23; was the top 10), 10 per page with
+    Prev / Next. Default order = failures (the Field Life summaries order).
+  - **Controls:** search (part or mode), subsystem, "Clear target only" / "Mixed causes only", sort
+    by failures or by main-cause share. Any change returns to page 1.
   - **Bar and count:** the part's failures (`fact_part_replacement` rows in scope), in a single
     colour, scaled to the largest part.
   - **Main cause line:** "Mostly {mode} ({share} %)", where mode = the most common `failure_mode`
@@ -161,6 +191,10 @@ used and flagged "extrapolated".
     before), over replacements where both are present;
   - a cell needs ≥ 3 failures; rows need ≥ 3;
   - colour value = max(0, ramp − 1).
+  - **Controls (2026-10-23):** search (part), subsystem, signal (shows that column only) and minimum
+    ramp (≥ 1.5× / 2× / 3×: keeps parts with at least one shown signal at or above it); all qualifying
+    parts in one grid (no pagination).
+  - Layout: full width, below Main Failure Cause by Part (the two were side by side until 2026-10-23).
   - Validation on the 2026-09-30 seed: Air P → Air Brake Compressor 6.4×, 24 V battery →
     Alternator 5.9×, DPF ΔP → DPF 3.4×.
 - **Fault Code → Part Confirmation.** Table, per `bridge_dtc_part` link that has resolved

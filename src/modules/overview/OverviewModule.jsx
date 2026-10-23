@@ -1,24 +1,26 @@
 import React, { useMemo, useRef, useState } from "react";
+import { BAR_CHART_PROPS, BAR_GRID, BAR_MAX_SIZE, BAR_RADIUS, BAR_X_AXIS, BAR_Y_AXIS, VALUE_LABEL } from "../../components/ui/barStyle";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, CalendarClock, Gauge, Radio, Siren, Search, X } from "lucide-react";
 import {
-  PieChart,
-  Pie,
   Cell,
   Legend,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  LineChart,
-  Line,
   BarChart,
   Bar,
   XAxis,
   YAxis,
   CartesianGrid,
+  LabelList,
 } from "recharts";
 import { format, formatDistanceStrict, parseISO } from "date-fns";
 import KpiCard from "../../components/kpi/KpiCard";
 import ChartHeader from "../../components/ui/ChartHeader";
+import DonutBreakdown from "../../components/ui/DonutBreakdown";
+import Hover from "../../components/ui/Hover";
+import { TABLE_COUNT, TABLE_FIRST_TD, TABLE_FRAME, TABLE_ROW, TABLE_SEARCH, TABLE_TD, TABLE_TH } from "../../components/ui/tableStyle";
+import RankedBars from "../../components/ui/RankedBars";
 import { useOverviewData, ACTION_STATUSES } from "../../hooks/useOverviewData";
 import { useFilterStore } from "../../store/useFilterStore";
 
@@ -63,20 +65,25 @@ function Pill({ className, children }) {
   );
 }
 
-function ChartCard({ title, tooltip, badge, children }) {
+function ChartCard({ title, subtitle, tooltip, badge, actions, children }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex items-start justify-between gap-2">
-        <ChartHeader title={title} tooltip={tooltip} />
-        {badge && (
-          <span
-            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${
-              badge === "NOW" ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-500"
-            }`}
-          >
-            {badge}
-          </span>
-        )}
+        <div className="min-w-0 flex-1">
+          <ChartHeader title={title} subtitle={subtitle} tooltip={tooltip} />
+        </div>
+        <div className="flex items-center gap-2">
+          {actions}
+          {badge && (
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${
+                badge === "NOW" ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {badge}
+            </span>
+          )}
+        </div>
       </div>
       {children}
     </div>
@@ -91,23 +98,16 @@ function EmptyChart({ message }) {
   return <div className="flex h-64 items-center justify-center text-sm text-slate-400">{message}</div>;
 }
 
-function TrendTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  const p = payload[0].payload;
-  return (
-    <div className="rounded-lg bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-slate-200">
-      <p className="mb-1 font-semibold text-slate-700">7 days to {format(parseISO(label), "d MMM")}</p>
-      <p className="text-violet-600">
-        Prediction alerts: {p.alertsPer100} per 100 trucks ({p.alerts})
-      </p>
-      <p className="text-rose-600">
-        Major/critical DTCs: {p.dtcsPer100} per 100 trucks ({p.dtcs})
-      </p>
-    </div>
-  );
-}
+// Colour (rgb) and the share at which the cell colour saturates, per band: rarer bands saturate earlier.
+const MATRIX_BANDS = [
+  { value: "Critical", label: "Critical", rgb: "225, 29, 72", saturation: 15 },
+  { value: "High", label: "High", rgb: "245, 158, 11", saturation: 15 },
+  { value: "Medium", label: "Medium", rgb: "56, 189, 248", saturation: 40 },
+  { value: "Low", label: "Low", rgb: "16, 185, 129", saturation: 100 },
+];
 
-function RiskMatrix({ matrix, onSelect }) {
+function RiskMatrix({ matrix, band, onSelect }) {
+  const { label: bandText, rgb, saturation } = MATRIX_BANDS.find((b) => b.value === band);
   if (matrix.rows.length === 0) return <EmptyChart message="No connected trucks match the filters." />;
   return (
     <div className="overflow-x-auto">
@@ -128,39 +128,42 @@ function RiskMatrix({ matrix, onSelect }) {
               if (cell.total === 0) {
                 return <div key={cell.modelId} className="h-12 rounded bg-slate-50" />;
               }
-              const alpha = cell.lowSample || cell.atRisk === 0 ? 0 : 0.15 + Math.min(cell.pct / 30, 1) * 0.75;
+              const count = cell.bands[band];
+              const pct = (count / cell.total) * 100;
+              const alpha = cell.lowSample || count === 0 ? 0 : 0.15 + Math.min(pct / saturation, 1) * 0.75;
               const dark = alpha > 0.5;
               return (
-                <button
+                <Hover
+                  as="button"
                   type="button"
                   key={cell.modelId}
                   onClick={() => onSelect(cell)}
-                  title={`${r.label} · ${cell.modelId}: ${cell.atRisk} of ${cell.total} trucks at risk${
+                  content={`${r.label} · ${matrix.cols.find((c) => c.id === cell.modelId)?.label ?? cell.modelId}: ${count} of ${cell.total} trucks at ${bandText} risk${
                     cell.lowSample ? ` (fewer than ${matrix.minTrucks} trucks, not rated)` : ""
                   }`}
                   className={`flex h-12 flex-col items-center justify-center rounded transition-transform hover:scale-[1.04] ${
                     cell.lowSample
                       ? "bg-slate-100 text-slate-400"
-                      : cell.atRisk === 0
+                      : count === 0
                         ? "text-slate-400 ring-1 ring-inset ring-slate-100"
                         : dark
                           ? "text-white"
                           : "text-slate-700"
                   }`}
-                  style={cell.lowSample ? undefined : { backgroundColor: `rgba(225, 29, 72, ${alpha})` }}
+                  style={cell.lowSample ? undefined : { backgroundColor: `rgba(${rgb}, ${alpha})` }}
                 >
-                  <span className="text-sm font-semibold">{cell.lowSample ? "—" : `${Math.round(cell.pct)}%`}</span>
+                  <span className="text-sm font-semibold">{cell.lowSample ? "—" : `${Math.round(pct)}%`}</span>
                   <span className="text-[10px] opacity-80">
-                    {cell.atRisk}/{cell.total}
+                    {count}/{cell.total}
                   </span>
-                </button>
+                </Hover>
               );
             })}
           </React.Fragment>
         ))}
       </div>
       <p className="mt-3 text-[11px] text-slate-400">
-        Cell = % of connected trucks at Critical or High risk. Grey cells have fewer than {matrix.minTrucks} trucks and
+        Cell = % of connected trucks at {bandText} risk. Grey cells have fewer than {matrix.minTrucks} trucks and
         are not rated.
       </p>
     </div>
@@ -170,7 +173,7 @@ function RiskMatrix({ matrix, onSelect }) {
 const EMPTY_FILTERS = { risk: null, regionId: null, modelId: null, partName: null, dueSoon: false };
 
 export default function OverviewModule() {
-  const { loading, error, kpis, riskPosture, earlyWarningTrend, riskMatrix, topFailingParts, actionRows } =
+  const { loading, error, kpis, riskPosture, riskMatrix, topFailingParts, repairMix, actionRows } =
     useOverviewData();
   const selectedVin = useFilterStore((s) => s.selectedVin);
   const setSelectedVin = useFilterStore((s) => s.setSelectedVin);
@@ -179,6 +182,7 @@ export default function OverviewModule() {
   const tableRef = useRef(null);
 
   const [crossFilters, setCrossFilters] = useState(EMPTY_FILTERS);
+  const [matrixBand, setMatrixBand] = useState("Critical");
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [now] = useState(() => Date.now());
@@ -243,7 +247,6 @@ export default function OverviewModule() {
 
   const fleetLabel = kpis.fleetSize > 0 ? `of ${kpis.fleetSize} connected trucks` : "no connected trucks in scope";
   const riskPct = kpis.fleetSize > 0 ? (kpis.atRiskCount / kpis.fleetSize) * 100 : 0;
-  const trendHasData = earlyWarningTrend.some((p) => p.alerts > 0 || p.dtcs > 0);
 
   return (
     <div className="space-y-4">
@@ -349,6 +352,7 @@ export default function OverviewModule() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ChartCard
           title="Fleet Risk Posture"
+          subtitle="Share of connected trucks by risk band"
           badge="NOW"
           tooltip="Each truck counted once, by the risk band of its worst monitored part (latest weekly prediction). Click a slice to filter the action list."
         >
@@ -357,91 +361,52 @@ export default function OverviewModule() {
           ) : kpis.fleetSize === 0 ? (
             <EmptyChart message="No connected trucks match the filters." />
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={riskPosture}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={70}
-                  outerRadius={100}
-                  paddingAngle={2}
-                  onClick={(slice) => applyCrossFilter({ risk: slice.payload?.name ?? slice.name })}
-                  className="cursor-pointer"
-                >
-                  {riskPosture.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-                <RechartsTooltip formatter={(value, name) => [`${value} trucks`, name]} />
-                <Legend verticalAlign="bottom" height={32} iconType="circle" itemSorter={null} wrapperStyle={LEGEND_STYLE} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
-        <ChartCard
-          title="Early-Warning Trend"
-          badge="PERIOD"
-          tooltip="Rolling 7-day count per 100 connected trucks of (a) new prediction alerts raised by the model and (b) new major/critical DTCs. Normalised so filters and fleet size don't distort it. Alerts leading DTCs means the model is warning early."
-        >
-          {loading ? (
-            <ChartSkeleton />
-          ) : !trendHasData ? (
-            <EmptyChart message="No alerts or major DTCs in this period." />
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={earlyWarningTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={(d) => format(parseISO(d), "d MMM")}
-                  tick={AXIS_TICK}
-                  axisLine={{ stroke: "#e2e8f0" }}
-                  tickLine={false}
-                  minTickGap={24}
-                />
-                <YAxis tick={AXIS_TICK} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} width={36} />
-                <RechartsTooltip content={<TrendTooltip />} />
-                <Legend verticalAlign="bottom" height={28} iconType="plainline" itemSorter={null} wrapperStyle={LEGEND_STYLE} />
-                <Line
-                  type="monotone"
-                  dataKey="alertsPer100"
-                  name="Prediction alerts / 100 trucks"
-                  stroke="#8b5cf6"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="dtcsPer100"
-                  name="Major/critical DTCs / 100 trucks"
-                  stroke="#e11d48"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <DonutBreakdown
+              data={riskPosture}
+              centerLabel="Total trucks"
+              valueSuffix="100% total"
+              onSliceClick={(slice) => applyCrossFilter({ risk: slice.name })}
+            />
           )}
         </ChartCard>
 
         <ChartCard
           title="Region × Model Risk Matrix"
           badge="NOW"
-          tooltip="Share of connected trucks at Critical or High risk for every region and model. Normalised per cell so large regions don't dominate. Click a cell to filter the action list."
+          tooltip="Share of connected trucks in the selected risk band (Critical, High, Medium or Low) for every region and model. Normalised per cell so large regions don't dominate. Click a cell to filter the action list."
+          actions={
+            <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+              {MATRIX_BANDS.map((b) => (
+                <button
+                  key={b.value}
+                  type="button"
+                  onClick={() => setMatrixBand(b.value)}
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    matrixBand === b.value ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          }
         >
           {loading ? (
             <ChartSkeleton />
           ) : (
             <RiskMatrix
               matrix={riskMatrix}
-              onSelect={(cell) => applyCrossFilter({ regionId: cell.regionId, modelId: cell.modelId })}
+              band={matrixBand}
+              onSelect={(cell) =>
+                applyCrossFilter({ regionId: cell.regionId, modelId: cell.modelId, risk: matrixBand })
+              }
             />
           )}
         </ChartCard>
 
         <ChartCard
           title="Top Predicted Failures by Part"
+          subtitle="Parts that are the worst part on Critical or High trucks, by truck count"
           badge="NOW"
           tooltip="Parts that are the worst part on Critical/High trucks, by number of trucks. Tells the workshop which parts and skills to prepare. Click a bar to filter the action list."
         >
@@ -450,36 +415,44 @@ export default function OverviewModule() {
           ) : topFailingParts.length === 0 ? (
             <EmptyChart message="No trucks at Critical or High risk." />
           ) : (
+            <RankedBars
+              rows={topFailingParts}
+              getLabel={(r) => r.partName}
+              segments={[
+                { key: "Critical", color: "#e11d48", name: "Critical" },
+                { key: "High", color: "#f59e0b", name: "High" },
+              ]}
+              onRowClick={(r) => applyCrossFilter({ partName: r.partName })}
+            />
+          )}
+        </ChartCard>
+
+        <ChartCard
+          title="Predicted vs Breakdown Repairs"
+          subtitle="Unplanned repair orders per month, last six months"
+          badge="MONTHLY"
+          tooltip="Unplanned repair orders per month on the connected trucks in scope, split into repairs booked after an early-warning alert (predicted) and repairs after the truck failed (breakdown). A growing predicted share means early warning is turning breakdowns into planned workshop visits. Planned servicing and other repairs are excluded; this chart ignores the date filter."
+        >
+          {loading ? (
+            <ChartSkeleton />
+          ) : repairMix.length === 0 ? (
+            <EmptyChart message="No predicted or breakdown repairs for these trucks." />
+          ) : (
             <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={topFailingParts} layout="vertical" margin={{ left: 8, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} />
-                <YAxis
-                  type="category"
-                  dataKey="partName"
-                  width={150}
-                  tickFormatter={(v) => truncateString(v, 22)}
-                  tick={AXIS_TICK}
-                  axisLine={{ stroke: "#e2e8f0" }}
-                  tickLine={false}
+              <BarChart data={repairMix} {...BAR_CHART_PROPS}>
+                <CartesianGrid {...BAR_GRID} />
+                <XAxis dataKey="month" tickFormatter={(m) => format(parseISO(`${m}-01`), "MMM")} {...BAR_X_AXIS} />
+                <YAxis allowDecimals={false} {...BAR_Y_AXIS} width={32} />
+                <RechartsTooltip
+                  cursor={{ fill: "#f8fafc" }}
+                  labelFormatter={(m) => format(parseISO(`${m}-01`), "MMMM yyyy")}
+                  formatter={(v, name, item) => [name === "Predicted" ? `${v} (${item.payload.predictedPct.toFixed(0)}% of unplanned)` : v, name]}
                 />
-                <RechartsTooltip cursor={{ fill: "#f8fafc" }} />
                 <Legend verticalAlign="bottom" height={28} iconType="circle" itemSorter={null} wrapperStyle={LEGEND_STYLE} />
-                <Bar
-                  dataKey="Critical"
-                  stackId="risk"
-                  fill="#e11d48"
-                  className="cursor-pointer"
-                  onClick={(d) => applyCrossFilter({ partName: d.payload?.partName ?? d.partName })}
-                />
-                <Bar
-                  dataKey="High"
-                  stackId="risk"
-                  fill="#f59e0b"
-                  radius={[0, 4, 4, 0]}
-                  className="cursor-pointer"
-                  onClick={(d) => applyCrossFilter({ partName: d.payload?.partName ?? d.partName })}
-                />
+                <Bar dataKey="predicted" name="Predicted" stackId="repairs" fill="#10b981" maxBarSize={BAR_MAX_SIZE} />
+                <Bar dataKey="breakdown" name="Breakdown" stackId="repairs" fill="#e11d48" radius={BAR_RADIUS} maxBarSize={BAR_MAX_SIZE}>
+                  <LabelList dataKey={(d) => d.predicted + d.breakdown} {...VALUE_LABEL} />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -487,22 +460,24 @@ export default function OverviewModule() {
       </div>
 
       {/* Workshop Action List */}
-      <div ref={tableRef} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="space-y-3 border-b border-slate-100 px-5 py-4">
+      <div ref={tableRef} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <ChartHeader
               title="Workshop Action List"
               tooltip="Trucks that need attention: Critical/High risk, due within 14 days, or an active major/critical DTC. Immediate Service = Critical, red stop lamp or derate. Plan Workshop = High or due within 14 days. Monitor = active fault only. Click a row to open the truck in Diagnostics."
             />
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search VIN or vehicle ID"
-                className="w-56 rounded-md border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-3 text-sm text-slate-700 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
-              />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="relative w-full max-w-md">
+              <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search VIN or vehicle ID" className={TABLE_SEARCH} />
             </div>
+            {!loading && (
+              <span className={TABLE_COUNT}>
+                Showing {filteredRows.length.toLocaleString("en-IN")} of {actionRows.length.toLocaleString("en-IN")} records
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -560,15 +535,15 @@ export default function OverviewModule() {
           </div>
         </div>
 
-        <div className="max-h-[28rem] overflow-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-slate-50">
+        <div className={`max-h-[28rem] ${TABLE_FRAME}`}>
+          <table className="w-full text-left">
+            <thead className="sticky top-0 z-10">
               <tr>
                 {["Truck", "Status", "Worst Part", "Fail. Prob (30d)", "RUL", "Related DTC", "Recommended Action", "Last Ping"].map(
                   (col) => (
                     <th
                       key={col}
-                      className="whitespace-nowrap border-b border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-400"
+                      className={TABLE_TH}
                     >
                       {col}
                     </th>
@@ -576,12 +551,12 @@ export default function OverviewModule() {
                 )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>
+                  <tr key={i} className={TABLE_ROW}>
                     {Array.from({ length: 8 }).map((__, j) => (
-                      <td key={j} className="px-4 py-4">
+                      <td key={j} className={TABLE_TD}>
                         <div className="h-4 w-full animate-pulse rounded bg-slate-50" />
                       </td>
                     ))}
@@ -601,31 +576,31 @@ export default function OverviewModule() {
                     <tr
                       key={r.vehicleId}
                       onClick={() => openDiagnostics(r.vehicleId)}
-                      className="group cursor-pointer align-top transition-colors hover:bg-sky-50"
+                      className={`group cursor-pointer ${TABLE_ROW} hover:bg-sky-50`}
                     >
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-700 group-hover:text-sky-700">{r.vin ?? r.vehicleId}</div>
+                      <td className={`${TABLE_TD}`}>
+                        <div className={`${TABLE_FIRST_TD} group-hover:text-sky-700`}>{r.vin ?? r.vehicleId}</div>
                         <div className="text-xs text-slate-400">
                           {r.modelLabel} · {r.regionName}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className={`${TABLE_TD}`}>
                         <Pill className={STATUS_STYLES[r.status]}>{r.status}</Pill>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className={`${TABLE_TD}`}>
                         <div className="text-slate-600">{r.partName ?? "—"}</div>
                         {r.band && <div className={`text-xs font-medium ${BAND_TEXT[r.band]}`}>{r.band}</div>}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">
+                      <td className={`${TABLE_TD} text-slate-600`}>
                         {r.failureProbability !== null ? `${(r.failureProbability * 100).toFixed(1)}%` : "—"}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      <td className={`${TABLE_TD} whitespace-nowrap text-slate-600`}>
                         {r.rulDays !== null ? `${r.rulDays} d` : "—"}
                         {r.rulKm !== null && (
                           <div className="text-xs text-slate-400">{Number(r.rulKm).toLocaleString("en-IN")} km</div>
                         )}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className={`${TABLE_TD}`}>
                         {r.relatedDtc ? (
                           <div className="flex items-start gap-1.5">
                             {r.relatedDtc.lamp && (
@@ -645,8 +620,8 @@ export default function OverviewModule() {
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="max-w-xs px-4 py-3 text-xs text-slate-600">{r.action ?? "—"}</td>
-                      <td className={`whitespace-nowrap px-4 py-3 text-xs ${stale ? "font-medium text-amber-600" : "text-slate-500"}`}>
+                      <td className={`${TABLE_TD} max-w-xs text-xs`}>{r.action ?? "—"}</td>
+                      <td className={`${TABLE_TD} whitespace-nowrap text-xs ${stale ? "font-medium text-amber-600" : "text-slate-500"}`}>
                         {!r.lastPing
                           ? "—"
                           : pingHours < 1

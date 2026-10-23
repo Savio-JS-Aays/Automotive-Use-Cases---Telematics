@@ -63,7 +63,7 @@ function resolvePeriod(dateRange, endDateId) {
 }
 
 const VEHICLE_COLUMNS = `vehicle_id, vin, model_id, model_label, region_id, region_name, powertrain,
-  application_id, application_name, customer_type, adas_equipped, telematics_source,
+  application_id, application_name, customer_type, vehicle_type, adas_equipped, telematics_source,
   primary_driver_id, primary_driver_alias`;
 
 const DAILY_COLUMNS = `vehicle_id, date_id, driver_id, is_operating, in_workshop, distance_km,
@@ -309,38 +309,26 @@ export function useTelematicsAssetData(vehicleId) {
 }
 
 /**
- * useVehicleDayTrace
- * ------------------
- * rFMS status snapshots (5-min reports) and harsh events for one truck on one day. Loaded
- * separately so switching the day doesn't refetch the whole Asset View.
+ * One truck's daily packet counts for any date range (Data Completeness Trend in the Asset View),
+ * independent of the global date range.
  */
-export function useVehicleDayTrace(vehicleId, dateId) {
-  const [trace, setTrace] = useState({ status: [], events: [], dateId: null });
+export function useVehicleCompleteness(vehicleId, fromStr, toStr) {
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
-    if (!vehicleId || !dateId) return undefined;
+    if (!vehicleId || !fromStr || !toStr) return undefined;
 
-    async function fetchTrace() {
+    async function fetchRows() {
       setLoading(true);
       setError(null);
       try {
-        const [status, events] = await Promise.all([
-          fetchAllRows(
-            "fact_vehicle_status",
-            `status_id, ts, trip_id, engine_state, wheel_speed_kmh, engine_rpm, fuel_level_pct, soc_pct,
-             driver_working_state, lat, lon`,
-            (q) => q.eq("vehicle_id", vehicleId).eq("date_id", dateId).order("status_id")
-          ),
-          fetchAllRows(
-            "fact_harsh_events",
-            "event_id, trip_id, ts, event_type, severity, speed_before_kmh, speed_after_kmh",
-            (q) => q.eq("vehicle_id", vehicleId).eq("date_id", dateId).order("event_id")
-          ),
-        ]);
-        if (isMounted) setTrace({ status, events, dateId });
+        const data = await fetchAllRows("fact_vehicle_daily", "date_id, packets_expected, packets_received", (q) =>
+          q.eq("vehicle_id", vehicleId).gte("date_id", fromStr).lte("date_id", toStr).order("date_id")
+        );
+        if (isMounted) setRows(data);
       } catch (err) {
         if (isMounted) setError(err);
       } finally {
@@ -348,11 +336,11 @@ export function useVehicleDayTrace(vehicleId, dateId) {
       }
     }
 
-    fetchTrace();
+    fetchRows();
     return () => {
       isMounted = false;
     };
-  }, [vehicleId, dateId]);
+  }, [vehicleId, fromStr, toStr]);
 
-  return useMemo(() => ({ loading, error, trace }), [loading, error, trace]);
+  return useMemo(() => ({ loading, error, rows }), [loading, error, rows]);
 }

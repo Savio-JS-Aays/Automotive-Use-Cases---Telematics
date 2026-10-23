@@ -32,7 +32,7 @@ import {
   workshopPrep,
   freezeLabel,
 } from "./diagnosticsMetrics";
-import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDateTime, formatDay, formatInr, formatNumber, formatPct } from "../telematics/telematicsFormat";
+import { AXIS_LINE, AXIS_TICK, GRID_STROKE, LEGEND_STYLE, formatDateTime, formatDay, formatInr, formatNumber } from "../telematics/telematicsFormat";
 import { ChartCard, ChartSkeleton, DataTable, EmptyChart, Pill } from "../telematics/TelematicsUi";
 import { ActionPill, LampPill, RiskPill, SeverityPill, StatePill } from "./diagnosticsUi";
 
